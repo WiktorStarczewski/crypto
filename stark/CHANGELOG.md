@@ -10,6 +10,7 @@
 - perf: faster constraint evaluation for wide matrices ([#57](https://github.com/0xMiden/p3-miden/pull/57)).
 - Added info-level tracing spans to prover path: per-trace LDE, quotient iDFT/scaling/DFT; promoted `eval_instance`, `compress tree layers`, and `build aux traces` from debug to info ([#61](https://github.com/0xMiden/p3-miden/pull/61)).
 - feat: add support for Blake3-192 ([#59](https://github.com/0xMiden/p3-miden/pull/59))
+- perf: fold constraints on the fly ([#55](https://github.com/0xMiden/p3-miden/pull/55))
 
 ## 0.5.0 (2026-03-10)
 
