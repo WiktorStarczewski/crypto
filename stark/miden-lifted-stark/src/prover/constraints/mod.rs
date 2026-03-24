@@ -15,7 +15,7 @@ use folder::ProverConstraintFolder;
 use miden_lifted_air::{LiftedAir, RowWindow, symbolic::ConstraintLayout};
 use p3_field::{
     Algebra, BasedVectorSpace, ExtensionField, Field, PackedFieldExtension, PackedValue,
-    TwoAdicField,
+    PrimeCharacteristicRing, TwoAdicField,
 };
 use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView};
 use p3_maybe_rayon::prelude::*;
@@ -171,7 +171,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
                     selectors,
                     base_alpha_powers: &base_alpha_powers,
                     ext_alpha_powers: &ext_alpha_powers,
-                    base_acc: Default::default(),
+                    base_acc: PE::<F, EF>::ZERO,
                     ext_acc: Default::default(),
                     base_constraint_index: 0,
                     ext_constraint_index: 0,
