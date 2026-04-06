@@ -566,6 +566,7 @@ pub struct InnerNode {
 }
 
 impl InnerNode {
+    #[inline(always)]
     pub fn hash(&self) -> Word {
         Poseidon2::merge(&[self.left, self.right])
     }

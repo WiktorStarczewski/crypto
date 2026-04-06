@@ -175,11 +175,15 @@ pub(crate) trait AlgebraicSponge {
     fn merge(values: &[Word; 2]) -> Word {
         // initialize the state by copying the digest elements into the rate portion of the state
         // (8 total elements), and set the capacity elements to 0.
+        const _: () = {
+            assert!(RATE_RANGE.end == 2 * Word::NUM_ELEMENTS);
+        };
+
         let mut state = [ZERO; STATE_WIDTH];
-        let it = Word::words_as_elements_iter(values.iter());
-        for (i, v) in it.enumerate() {
-            state[RATE_RANGE.start + i] = *v;
-        }
+        state[RATE_RANGE.start..RATE_RANGE.start + Word::NUM_ELEMENTS]
+            .copy_from_slice(&values[0].into_elements());
+        state[RATE_RANGE.start + Word::NUM_ELEMENTS..RATE_RANGE.end]
+            .copy_from_slice(&values[1].into_elements());
 
         // apply the permutation and return the digest portion of the state
         Self::apply_permutation(&mut state);
@@ -199,11 +203,15 @@ pub(crate) trait AlgebraicSponge {
     fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
         // initialize the state by copying the digest elements into the rate portion of the state
         // (8 total elements), and set the capacity elements to 0.
+        const _: () = {
+            assert!(RATE_RANGE.end == 2 * Word::NUM_ELEMENTS);
+        };
+
         let mut state = [ZERO; STATE_WIDTH];
-        let it = Word::words_as_elements_iter(values.iter());
-        for (i, v) in it.enumerate() {
-            state[RATE_RANGE.start + i] = *v;
-        }
+        state[RATE_RANGE.start..RATE_RANGE.start + Word::NUM_ELEMENTS]
+            .copy_from_slice(&values[0].into_elements());
+        state[RATE_RANGE.start + Word::NUM_ELEMENTS..RATE_RANGE.end]
+            .copy_from_slice(&values[1].into_elements());
 
         // set the second capacity element to the domain value. The first capacity element is used
         // for padding purposes.
