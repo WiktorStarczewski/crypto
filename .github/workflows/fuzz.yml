@@ -63,7 +63,20 @@ jobs:
         run: cargo +nightly install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)
         run: |
-          # Build the fuzz target first
-          cargo +nightly fuzz build --fuzz-dir miden-crypto-fuzz ${{ matrix.target }}
+          fuzz_target="$(cargo +nightly fuzz build --help | awk '
+            $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
+            in_target && /\[default:/ {
+              sub(/^.*\[default: /, "")
+              sub(/\].*$/, "")
+              print
+              exit
+            }
+          ')"
+          test -n "$fuzz_target"
+
+          # Build the fuzz target first.
+          cargo +nightly fuzz build --target "$fuzz_target" --fuzz-dir miden-crypto-fuzz ${{ matrix.target }}
           # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
-          miden-crypto-fuzz/target/x86_64-unknown-linux-gnu/release/${{ matrix.target }} -max_total_time=60 -runs=10000
+          fuzz_bin="miden-crypto-fuzz/target/$fuzz_target/release/${{ matrix.target }}"
+          test -x "$fuzz_bin"
+          "$fuzz_bin" -max_total_time=60 -runs=10000
