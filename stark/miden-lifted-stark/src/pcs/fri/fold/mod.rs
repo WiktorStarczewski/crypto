@@ -201,6 +201,7 @@ pub mod tests {
 
     use super::*;
     use crate::{
+        domain::{Coset, TwoAdicSubgroup},
         pcs::utils::horner,
         testing::{
             configs::goldilocks_poseidon2::{Felt, QuadFelt},
@@ -264,8 +265,11 @@ pub mod tests {
         let poly: Vec<Ext> = (0..arity).map(|_| rng.sample(StandardUniform)).collect();
 
         // Compute roots of unity in bit-reversed order for this arity
-        let mut roots: Vec<Base> =
-            Base::two_adic_generator(log_arity).powers().take(arity).collect();
+        let mut roots: Vec<Base> = TwoAdicSubgroup::<Base>::new(log_arity as u8)
+            .generator()
+            .powers()
+            .take(arity)
+            .collect();
         reverse_slice_index_bits(&mut roots);
 
         let s: Base = rng.sample(StandardUniform);
@@ -345,7 +349,7 @@ pub mod tests {
         // Compute s_invs
         let log_num_cosets = log_lde_size - log_arity;
         let num_cosets = 1 << log_num_cosets;
-        let g_inv = Felt::two_adic_generator(log_lde_size).inverse();
+        let g_inv = TwoAdicSubgroup::<Felt>::new(log_lde_size as u8).generator_inverse();
         let mut s_invs: Vec<Felt> = g_inv.powers().take(num_cosets).collect();
         reverse_slice_index_bits(&mut s_invs);
 

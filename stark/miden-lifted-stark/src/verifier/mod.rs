@@ -56,7 +56,7 @@ use thiserror::Error;
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
+    domain::{Coset, LiftedDomain},
     instance::{AirInstance, InstanceValidationError, validate_air_order, validate_inputs},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
@@ -182,10 +182,9 @@ where
     let constraint_degree = 1 << log_constraint_degree as usize;
 
     let max_trace_height = 1 << log_max_trace_height as usize;
-    let log_lde_height = log_max_trace_height + log_blowup;
 
     // Max LDE coset (for the largest trace, no lifting)
-    let max_lde_coset = LiftedCoset::unlifted(log_max_trace_height, log_blowup);
+    let max_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup);
 
     // 1. Receive main trace commitment
     let main_commit = channel.receive_commitment()?.clone();
@@ -221,8 +220,8 @@ where
     let quotient_commit = channel.receive_commitment()?.clone();
 
     // 6. Sample OOD point (outside max trace domain H and max LDE coset gK)
-    let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-    let h = F::two_adic_generator(log_max_trace_height.into());
+    let z: EF = max_lde_domain.sample_ood_point(&mut channel);
+    let h = max_lde_domain.trace_subgroup().generator();
     let z_next = z * h;
 
     // 7. Widths per commitment group (unpadded data widths).
@@ -244,7 +243,7 @@ where
         config.pcs(),
         config.lmcs(),
         &commitments,
-        log_lde_height,
+        &max_lde_domain,
         [z, z_next],
         &mut channel,
     )?;
@@ -265,7 +264,8 @@ where
     let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
     for (j, (air, inst)) in instances.iter().enumerate() {
-        let coset_j = LiftedCoset::new(log_trace_heights[j], log_blowup, log_max_trace_height);
+        let domain_j = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup)
+            .sub_domain(log_trace_heights[j]);
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());
@@ -276,8 +276,8 @@ where
         let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))?;
         let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
-        // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedCoset).
-        let selectors = coset_j.selectors_at::<F, _>(z);
+        // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedDomain).
+        let selectors = domain_j.selectors_at(z);
 
         // Periodic values: for a column with period p, eval_at computes z^{n/p}.
         // Using (max_trace_height, z) gives z^{max_n / p}, which equals
@@ -323,9 +323,10 @@ where
     // Quotient group has a single matrix; row 0 is the evaluation at z.
     let quot_row = opened[quot_g][0].row_slice(0).expect("quotient row 0");
     let quotient_chunks = row_to_packed_ext::<F, EF>(&quot_row)?;
-    let quotient_z = reconstruct_quotient::<F, EF>(z, &max_lde_coset, &quotient_chunks);
+    let quotient_z = reconstruct_quotient::<F, EF>(z, &max_lde_domain, &quotient_chunks);
 
-    let vanishing = max_lde_coset.vanishing_at::<F, _>(z);
+    // `max_lde_domain` is the tallest (lift_ratio = 0), so lifted == unlifted here.
+    let vanishing = max_lde_domain.trace_subgroup().vanishing_at(z);
     if accumulated != quotient_z * vanishing {
         return Err(VerifierError::ConstraintMismatch);
     }

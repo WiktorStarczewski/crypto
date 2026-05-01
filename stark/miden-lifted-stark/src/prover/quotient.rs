@@ -20,7 +20,7 @@ use tracing::info_span;
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
+    domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, bitrev::materialize_bitrev},
     prover::commit::Committed,
 };
@@ -61,34 +61,31 @@ pub fn cyclic_extend_and_scale<EF: Field>(accumulator: &mut Vec<EF>, target_len:
 /// Divide quotient numerator by vanishing polynomial in-place (natural order).
 ///
 /// Replaces each `numerator[i]` with `numerator[i] / Z_H(xᵢ)` where
-/// `Z_H(X) = Xᴺ − 1` and `N` is the trace height.
+/// `Z_H(X) = Xᴺ − 1`, `N` is the trace height, and `xᵢ` ranges over the
+/// quotient evaluation coset `gJ` of size `N · D` (`D = 2^log_d`).
 ///
-/// This uses a periodicity trick: on the quotient evaluation coset `gJ` of size `N·D`,
-/// the values `Z_H(x)` take only `D` distinct values, so we can batch-invert those `D`
-/// values once and reuse them by modular indexing.
-///
-/// Note that here `coset.log_blowup()` is `log2(D)` because `coset` is the *quotient*
-/// domain (blowup = constraint degree), not the PCS/FRI blowup `B`.
-pub fn divide_by_vanishing_in_place<F, EF>(numerator: &mut [EF], coset: &LiftedCoset)
-where
+/// Periodicity trick: on `gJ`, `Z_H(x)` takes only `D` distinct values, so we
+/// batch-invert those `D` values once and reuse them by modular indexing.
+pub fn divide_by_vanishing_in_place<F, EF>(
+    numerator: &mut [EF],
+    domain: &LiftedDomain<F>,
+    log_d: u8,
+) where
     F: TwoAdicField,
     EF: ExtensionField<F>,
 {
-    // D = constraint degree. On the quotient coset, log_blowup() = log₂(D).
-    let log_blowup = coset.log_blowup();
-    let num_distinct = 1 << log_blowup;
+    let num_distinct = 1usize << log_d as usize;
 
     // The D distinct values of Z_H on gJ:
-    // Z_H(g·ω_Jⁱ) = sᴺ·ω_Dⁱ − 1 where
-    // - s is the coset shift
-    // - ω_D is a D-th root of unity.
-    let shift: F = coset.lde_shift();
-    let s_pow_n = shift.exp_power_of_2(coset.log_trace_height as usize);
-    let z_h_evals: Vec<F> = F::two_adic_generator(log_blowup)
-        .powers()
-        .take(num_distinct)
-        .map(|x| s_pow_n * x - F::ONE)
-        .collect();
+    // Z_H(s·ω_Jⁱ) = sᴺ·ω_Dⁱ − 1 where
+    // - s is the LDE shift (the evaluation coset shares it)
+    // - ω_D is the size-D primitive root.
+    let eval_coset = domain.evaluation_coset(log_d);
+    let shift = eval_coset.shift();
+    let s_pow_n = shift.exp_power_of_2(domain.log_trace_height() as usize);
+    let omega_d = eval_coset.subgroup().shrink(domain.log_trace_height()).generator();
+    let z_h_evals: Vec<F> =
+        omega_d.powers().take(num_distinct).map(|x| s_pow_n * x - F::ONE).collect();
 
     let inv_van = batch_multiplicative_inverse(&z_h_evals);
 
@@ -133,14 +130,14 @@ where
 pub fn commit_quotient<F, EF, SC>(
     config: &SC,
     q_evals: Vec<EF>,
-    coset: &LiftedCoset,
+    domain: &LiftedDomain<F>,
 ) -> Committed<F, RowMajorMatrix<F>, SC::Lmcs>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
-    let n = coset.trace_height();
+    let n = domain.trace_height();
     let d = q_evals.len() / n;
     let log_d = log2_strict_usize(d);
     let log_blowup = config.pcs().log_blowup();
@@ -172,7 +169,7 @@ where
     // Multiply c_hat[t, k] by (ω_Jᵗ)⁻ᵏ → a[t, k]·gᵏ.
     // This removes the per-coset shift ω_Jᵗ while keeping gᵏ baked in.
     info_span!("quotient scaling", n).in_scope(|| {
-        let omega_j_inv = F::two_adic_generator(coset.log_trace_height as usize + log_d).inverse();
+        let omega_j_inv = domain.evaluation_coset(log_d as u8).subgroup().generator_inverse();
 
         // Precompute ω_J⁻ᵏ for k = 0..N with sequential multiplications
         let row_bases: Vec<F> = omega_j_inv.powers().take(n).collect();
@@ -234,5 +231,6 @@ where
 
     let tree = config.lmcs().build_aligned_tree(vec![quotient_matrix]);
 
-    Committed::new(tree, log_blowup)
+    // The quotient is committed on the same LDE coset as the trace commits.
+    Committed::new(tree, *domain)
 }

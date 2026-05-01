@@ -105,7 +105,7 @@ use tracing::{info_span, instrument};
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
+    domain::{Coset, LiftedDomain},
     instance::{AirWitness, InstanceShapes, InstanceValidationError, validate_inputs},
     pcs::prover::open_with_channel,
     proof::{StarkOutput, StarkProof},
@@ -223,12 +223,11 @@ where
         });
     }
 
-    let log_lde_height = log_max_trace_height + log_blowup;
-
-    // Max LDE coset (for the largest trace, no lifting)
-    let max_lde_coset = LiftedCoset::unlifted(log_max_trace_height, log_blowup);
-    let max_quotient_coset = max_lde_coset.quotient_domain(log_constraint_degree);
-    let max_quotient_height = max_quotient_coset.lde_height();
+    // Max LDE coset (for the largest trace, no lifting).
+    let max_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup);
+    // Quotient evaluation coset: a sub-coset of the LDE coset where Q is evaluated
+    // before being decomposed into D chunks and committed on the LDE coset itself.
+    let max_quotient_height = max_lde_domain.evaluation_coset(log_constraint_degree).size();
 
     // 1. Commit all main traces (trace order — ascending height).
     //
@@ -328,11 +327,10 @@ where
             let trace_height = w.trace.height();
             let log_trace_height = log2_strict_u8(trace_height);
 
-            // Create LiftedCoset for this trace (may be lifted relative to max)
-            let this_lde_coset =
-                LiftedCoset::new(log_trace_height, log_blowup, log_max_trace_height);
-            let this_quotient_coset = this_lde_coset.quotient_domain(log_constraint_degree);
-            let this_quotient_height = this_quotient_coset.lde_height();
+            // Create LiftedDomain for this trace (may be lifted relative to max).
+            let this_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup)
+                .sub_domain(log_trace_height);
+            let this_quotient_height = this_lde_domain.trace_height() * constraint_degree;
 
             // Truncate the committed LDE to the quotient evaluation domain gJ (size N·D).
             // Since B ≥ D, the committed LDE on gK (size N·B) contains gJ as a prefix in
@@ -341,8 +339,11 @@ where
             let aux_on_gj = aux_committed.evals_on_quotient_domain(i, constraint_degree);
 
             // Build periodic LDE for this trace via coset method
-            let periodic_lde =
-                PeriodicLde::build(&this_quotient_coset, air.periodic_columns_matrix());
+            let periodic_lde = PeriodicLde::build(
+                &this_lde_domain,
+                log_constraint_degree,
+                air.periodic_columns_matrix(),
+            );
 
             // Cyclically extend accumulator to this quotient height and scale by beta.
             // On the first iteration the accumulator is empty, so this is a no-op
@@ -366,7 +367,8 @@ where
                         *air,
                         &main_on_gj,
                         &aux_on_gj,
-                        &this_quotient_coset,
+                        &this_lde_domain,
+                        log_constraint_degree,
                         alpha,
                         &randomness[..air.num_randomness()],
                         w.public_values,
@@ -379,22 +381,26 @@ where
         }
     });
 
-    // Verify we have the expected size (max quotient domain)
+    // Verify we have the expected size (max quotient evaluation coset)
     assert_eq!(accumulator.len(), max_quotient_height);
 
     // 6. Divide by vanishing polynomial once on full gJ (in-place)
     tracing::debug_span!("divide_by_vanishing", height = max_quotient_height).in_scope(|| {
-        quotient::divide_by_vanishing_in_place::<F, EF>(&mut accumulator, &max_quotient_coset);
+        quotient::divide_by_vanishing_in_place::<F, EF>(
+            &mut accumulator,
+            &max_lde_domain,
+            log_constraint_degree,
+        );
     });
 
     // 7. Commit quotient
     let quotient_committed = info_span!("commit to quotient poly chunks")
-        .in_scope(|| quotient::commit_quotient(config, accumulator, &max_lde_coset));
+        .in_scope(|| quotient::commit_quotient(config, accumulator, &max_lde_domain));
     channel.send_commitment(quotient_committed.root());
 
     // 8. Sample OOD point (outside H and gK)
-    let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-    let h = F::two_adic_generator(log_max_trace_height.into());
+    let z: EF = max_lde_domain.sample_ood_point(&mut channel);
+    let h = max_lde_domain.trace_subgroup().generator();
     let z_next = z * h;
 
     // 9. Open via PCS
@@ -404,7 +410,7 @@ where
         open_with_channel::<F, EF, SC::Lmcs, RowMajorMatrix<F>, _, 2>(
             config.pcs(),
             config.lmcs(),
-            log_lde_height,
+            &max_lde_domain,
             [z, z_next],
             &trees,
             &mut channel,

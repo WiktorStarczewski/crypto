@@ -14,7 +14,11 @@ use miden_lifted_air::{
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_util::log2_strict_usize;
 
-use crate::{coset::LiftedCoset, selectors::Selectors, verifier::VerifierError};
+use crate::{
+    domain::{Coset, LiftedDomain},
+    selectors::Selectors,
+    verifier::VerifierError,
+};
 
 // ============================================================================
 // ConstraintFolder
@@ -164,7 +168,7 @@ where
 /// The key observation is that the map `x → xᴺ` collapses each coset
 /// `g·ω_Jᵗ·H` to a single `D`-th root of unity. Let
 /// - ωₛ = ω_Jᴺ (a `D`-th root of unity),
-/// - u = (z/s)ᴺ where s = coset.lde_shift().
+/// - u = (z/s)ᴺ where s = domain.lde_shift().
 ///
 /// Then `Q(z)` is the barycentric interpolation of the values qₜ(z) at the points
 /// ωₛᵗ:
@@ -173,17 +177,18 @@ where
 /// wₜ = ωₛᵗ / (u − ωₛᵗ)
 /// Q(z) = (Σₜ wₜ·qₜ(z)) / (Σₜ wₜ)
 /// ```
-pub fn reconstruct_quotient<F, EF>(z: EF, coset: &LiftedCoset, chunks: &[EF]) -> EF
+pub fn reconstruct_quotient<F, EF>(z: EF, domain: &LiftedDomain<F>, chunks: &[EF]) -> EF
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
 {
     let log_d = log2_strict_usize(chunks.len());
-    let shift: F = coset.lde_shift();
-    let omega_s = F::two_adic_generator(log_d);
+    // Generator of the size-D subgroup, where D = constraint degree.
+    let eval_coset = domain.evaluation_coset(log_d as u8);
+    let omega_s = eval_coset.subgroup().shrink(domain.log_trace_height()).generator();
 
-    // u = (z/s)ᴺ where s = lde_shift
-    let u = (z * shift.inverse()).exp_power_of_2(coset.log_trace_height as usize);
+    // u = (z/s)ᴺ where s = lde_shift (same as the evaluation coset's shift).
+    let u = (z * eval_coset.shift_inverse()).exp_power_of_2(domain.log_trace_height() as usize);
 
     // Compute weighted sum: Σₜ wₜ·qₜ(z) and Σₜ wₜ
     let mut numerator = EF::ZERO;

@@ -21,7 +21,7 @@ use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView
 use p3_maybe_rayon::prelude::*;
 use packed_row_bitrev::RowMajorMatrixBitrevPackedExt;
 
-use crate::{coset::LiftedCoset, prover::periodic::PeriodicLde};
+use crate::{domain::LiftedDomain, prover::periodic::PeriodicLde};
 
 /// Row-blocks (`i_start = r * packing_width`) processed per rayon task.
 const ROW_BLOCKS_PER_PARALLEL_TASK: usize = 32;
@@ -69,7 +69,8 @@ pub fn evaluate_constraints_into<F, EF, A>(
     air: &A,
     main_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
     aux_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
-    coset: &LiftedCoset,
+    domain: &LiftedDomain<F>,
+    log_constraint_degree: u8,
     alpha: EF,
     randomness: &[EF],
     public_values: &[F],
@@ -85,15 +86,15 @@ pub fn evaluate_constraints_into<F, EF, A>(
     type P<F> = PackedVal<F>;
     type PE<F, EF> = PackedExt<F, EF>;
 
-    let gj_height = coset.lde_height();
+    let constraint_degree = 1usize << log_constraint_degree as usize;
+    let gj_height = domain.trace_height() * constraint_degree;
     assert_eq!(output.len(), gj_height);
-    let constraint_degree = coset.blowup();
     let width = P::<F>::WIDTH;
 
     assert_eq!(gj_height % width, 0, "quotient height must be divisible by packing width");
 
-    // Precompute selectors via coset method
-    let sels = coset.selectors::<F>();
+    // Precompute selectors over the quotient evaluation coset.
+    let sels = domain.selectors(log_constraint_degree);
 
     // ─── Decompose alpha powers by constraint layout ───
     let aux_ef_width = air.aux_width();

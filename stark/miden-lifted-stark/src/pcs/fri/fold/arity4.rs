@@ -27,6 +27,8 @@ use core::array;
 
 use p3_field::{Algebra, TwoAdicField};
 
+use crate::domain::{Coset, TwoAdicSubgroup};
+
 /// Evaluate the folded value `g(s⁴)` from evaluations on a coset
 /// (equals `f(β)` when `deg f < 4`).
 ///
@@ -79,7 +81,7 @@ where
     PEF: Algebra<PF>,
 {
     // ω = i, primitive 4th root of unity
-    let w: PF = F::two_adic_generator(2).into();
+    let w: PF = TwoAdicSubgroup::<F>::new(2).generator().into();
 
     // Input (bit-reversed): [y₀, y₂, y₁, y₃]
     let [y0, y2, y1, y3] = evals;

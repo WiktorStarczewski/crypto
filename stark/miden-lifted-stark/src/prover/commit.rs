@@ -19,7 +19,7 @@ use tracing::info_span;
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
+    domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree, bitrev::materialize_bitrev},
 };
 
@@ -50,8 +50,8 @@ use crate::{
 /// let view = committed.evals_on_quotient_domain(0, constraint_degree);
 /// ```
 ///
-/// Storing the blowup also avoids re-deriving `trace_height = lde_height / blowup` for each
-/// matrix, which is needed for quotient-domain views and lifting shifts.
+/// Storing the canonical max domain avoids re-deriving heights/shifts per
+/// matrix, and ties the [`Committed`] to a specific batch's max coset by type.
 pub struct Committed<F, M, L>
 where
     F: TwoAdicField,
@@ -60,8 +60,10 @@ where
 {
     /// The underlying LMCS tree.
     tree: L::Tree<M>,
-    /// Log₂ of the blowup factor used during LDE.
-    log_blowup: u8,
+    /// Canonical [`LiftedDomain`] for the batch's tallest matrix
+    /// (max trace height + blowup). Per-matrix domains derive from this via
+    /// [`LiftedDomain::sub_domain`].
+    max_domain: LiftedDomain<F>,
 }
 
 impl<F, M, L> Committed<F, M, L>
@@ -74,11 +76,17 @@ where
     ///
     /// # Arguments
     ///
-    /// - `tree`: The LMCS tree containing committed LDE matrices
-    /// - `log_blowup`: Log₂ of the blowup factor used during LDE
+    /// - `tree`: The LMCS tree containing committed LDE matrices.
+    /// - `max_domain`: The canonical max-trace [`LiftedDomain`] for the batch. Its `lde_height()`
+    ///   must match `tree.height()`.
     #[inline]
-    pub fn new(tree: L::Tree<M>, log_blowup: u8) -> Self {
-        Self { tree, log_blowup }
+    pub fn new(tree: L::Tree<M>, max_domain: LiftedDomain<F>) -> Self {
+        debug_assert_eq!(
+            tree.height(),
+            max_domain.lde_height(),
+            "tree height must match max_domain.lde_height()",
+        );
+        Self { tree, max_domain }
     }
 
     /// Get the commitment root.
@@ -93,26 +101,18 @@ where
         &self.tree
     }
 
-    /// Get log₂ of the maximum LDE height across all matrices.
-    ///
-    /// This is the height of the tree (the largest matrix height).
-    #[inline]
-    fn log_max_lde_height(&self) -> u8 {
-        log2_strict_u8(self.tree.height())
-    }
-
-    /// Returns the [`LiftedCoset`] the `m`-th matrix was committed on.
+    /// Returns the [`LiftedDomain`] the `m`-th matrix was committed on, derived
+    /// as a sub-domain of [`max_domain`](Self::max_domain).
     ///
     /// # Panics
     ///
     /// Panics if `m >= num_matrices()`.
-    fn lifted_coset(&self, m: usize) -> LiftedCoset {
+    fn lifted_domain(&self, m: usize) -> LiftedDomain<F> {
         let matrix = &self.tree.leaves()[m];
         let log_lde_height = log2_strict_u8(matrix.height());
-        let log_trace_height = log_lde_height - self.log_blowup;
-        let log_max_trace_height = self.log_max_lde_height() - self.log_blowup;
-
-        LiftedCoset::new(log_trace_height, self.log_blowup, log_max_trace_height)
+        let log_blowup = self.max_domain.log_blowup();
+        let log_trace_height = log_lde_height - log_blowup;
+        self.max_domain.sub_domain(log_trace_height)
     }
 }
 
@@ -137,7 +137,7 @@ where
         m: usize,
         constraint_degree: usize,
     ) -> BitReversedMatrixView<RowMajorMatrixView<'_, F>> {
-        let quotient_height = self.lifted_coset(m).trace_height() * constraint_degree;
+        let quotient_height = self.lifted_domain(m).trace_height() * constraint_degree;
         self.tree.leaves()[m].split_rows(quotient_height).0.bit_reverse_rows()
     }
 }
@@ -191,9 +191,10 @@ where
 
     let log_blowup = config.pcs().log_blowup();
 
-    // Find max trace height
+    // Canonical max-trace domain for the batch.
     let max_trace_height = traces.last().unwrap().height();
     let log_max_trace_height = log2_strict_u8(max_trace_height);
+    let max_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup);
 
     let ldes: Vec<_> = traces
         .into_iter()
@@ -210,9 +211,8 @@ where
 
             let log_trace_height = log2_strict_u8(trace_height);
 
-            // Use LiftedCoset to compute the coset shift
-            let coset = LiftedCoset::new(log_trace_height, log_blowup, log_max_trace_height);
-            let coset_shift = coset.lde_shift::<F>();
+            // Per-matrix sub-domain provides the (canonical) coset shift.
+            let coset_shift = max_domain.sub_domain(log_trace_height).lde_shift();
 
             info_span!("LDE", trace = idx, log_height = log_trace_height, width).in_scope(|| {
                 let lde = config.dft().coset_lde_batch(trace, log_blowup.into(), coset_shift);
@@ -223,7 +223,7 @@ where
 
     // Build aligned LMCS tree and wrap in Committed
     let tree = config.lmcs().build_aligned_tree(ldes);
-    Committed::new(tree, log_blowup)
+    Committed::new(tree, max_domain)
 }
 
 // ============================================================================

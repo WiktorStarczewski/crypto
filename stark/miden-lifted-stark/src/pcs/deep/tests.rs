@@ -9,6 +9,7 @@ use verifier::DeepOracle;
 
 use super::*;
 use crate::{
+    domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     testing::configs::goldilocks_poseidon2::{
         Felt, Lmcs as BaseLmcs, QuadFelt, prover_channel_with_commitment, test_lmcs,
@@ -26,6 +27,8 @@ fn deep_quotient_end_to_end() {
     let log_blowup: u8 = 2;
     let log_lde_height: u8 = 10;
     let lde_height = 1 << log_lde_height as usize;
+    let max_domain: LiftedDomain<Felt> =
+        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup);
 
     let params = DeepParams { deep_pow_bits: 1 };
     // Two random opening points
@@ -53,9 +56,9 @@ fn deep_quotient_end_to_end() {
     let trace_trees: &[&_] = &[&tree];
     let deep_poly = DeepPoly::from_trees::<BaseLmcs, _, 2, _>(
         params,
+        &max_domain,
         trace_trees,
         [z1, z2],
-        log_blowup,
         &mut prover_channel,
     );
     // Sample domain indices. The LMCS tree is indexed by domain order.
@@ -71,7 +74,7 @@ fn deep_quotient_end_to_end() {
     // Step 4: Verifier constructs DeepOracle with same transcript state
     let mut verifier_channel = verifier_channel_with_commitment(&transcript, &commitment);
     let (deep_oracle, _evals) =
-        DeepOracle::new(params, &[z1, z2], commitments, log_lde_height, &mut verifier_channel)
+        DeepOracle::new(params, &[z1, z2], commitments, &max_domain, &mut verifier_channel)
             .expect("DeepOracle construction should succeed");
 
     // Step 5: Verify at multiple query tree indices (proofs are read from transcript)

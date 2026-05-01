@@ -19,6 +19,8 @@ use core::array;
 
 use p3_field::{Algebra, TwoAdicField};
 
+use crate::domain::{Coset, TwoAdicSubgroup};
+
 /// Evaluate the folded value `g(s⁸)` from evaluations on a coset
 /// (equals `f(β)` when `deg f < 8`).
 ///
@@ -80,8 +82,8 @@ where
     PEF: Algebra<PF>,
 {
     // Compute powers of ω₈ needed for inverse twiddles
-    let w8 = F::two_adic_generator(3);
-    let w8_2 = F::two_adic_generator(2);
+    let w8 = TwoAdicSubgroup::<F>::new(3).generator();
+    let w8_2 = TwoAdicSubgroup::<F>::new(2).generator();
     let w8_3 = w8_2 * w8;
     let w8_5 = w8_3 * w8_2;
     let w8_6 = w8_3.square();

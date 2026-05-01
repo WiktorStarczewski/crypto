@@ -4,11 +4,7 @@ use core::{
     ops::{Add, Mul},
 };
 
-use p3_field::{
-    ExtensionField, Field, PackedFieldExtension, PackedValue, TwoAdicField,
-    coset::TwoAdicMultiplicativeCoset,
-};
-use p3_util::reverse_slice_index_bits;
+use p3_field::{ExtensionField, Field, PackedFieldExtension, PackedValue};
 
 // ============================================================================
 // Extension trait for PackedFieldExtension methods not in upstream
@@ -82,25 +78,4 @@ impl<
     P: PackedFieldExtension<BaseField, ExtField>,
 > PackedFieldExtensionExt<BaseField, ExtField> for P
 {
-}
-
-/// Coset points `gK` in bit-reversed order.
-///
-/// Note: the coset shift `g` is fixed to `F::GENERATOR` by convention in this PCS.
-///
-/// Bit-reversal gives two properties essential for lifting:
-/// - **Adjacent negation**: `gK[2i+1] = -gK[2i]`, so both square to the same value
-/// - **Squaring gives prefix**: `(gK[2i])² = (gK)²[i]` — the even-indexed elements, when squared,
-///   form the half-size sub-coset. Generalizes to r-th powers.
-///
-/// Together these enable iterative weight folding in barycentric evaluation.
-///
-/// # Panics
-/// Panics if the two-adic coset construction fails (e.g., `log_n` exceeds the field's
-/// two-adicity), since this unwraps `TwoAdicMultiplicativeCoset::new`.
-pub fn bit_reversed_coset_points<F: TwoAdicField>(log_n: u8) -> Vec<F> {
-    let coset = TwoAdicMultiplicativeCoset::new(F::GENERATOR, log_n as usize).unwrap();
-    let mut pts: Vec<F> = coset.iter().collect();
-    reverse_slice_index_bits(&mut pts);
-    pts
 }

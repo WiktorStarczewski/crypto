@@ -5,9 +5,22 @@
 //!
 //! ## Domain Convention
 //!
-//! This FRI implementation treats inputs as evaluations over the unshifted two-adic subgroup.
-//! If the PCS evaluates over a coset `gK`, the shift is absorbed into the polynomial:
-//! `Q'(X) = Q(g·X)`. The low-degree test is run on `Q'` using subgroup points.
+//! This FRI implementation treats inputs as evaluations over the unshifted two-adic
+//! subgroup. If the PCS evaluates over a coset `gK`, the shift is absorbed into
+//! the polynomial: `Q'(X) = Q(g·X)`. The low-degree test is run on `Q'` using
+//! subgroup points.
+//!
+//! ## Type vocabulary
+//!
+//! FRI takes its initial domain as a [`TwoAdicSubgroup<F>`](crate::domain::TwoAdicSubgroup) —
+//! the unshifted view of the LDE coset. Each fold round shrinks the domain by the
+//! folding arity, derived via [`TwoAdicSubgroup::shrink`] (or per-round
+//! generator squaring inside the round loop, which is equivalent and avoids
+//! re-querying `F::two_adic_generator`). Internal `arity`-th roots of unity
+//! used by the fold operations come from `TwoAdicSubgroup::<F>::new(log_arity).generator()`.
+//! Together with [`LiftedDomain`](crate::domain::LiftedDomain) at the layer above, this
+//! routes every two-adic root and every multiplicative coset shift through the
+//! two encapsulation types.
 
 pub mod fold;
 pub mod proof;
@@ -63,12 +76,9 @@ impl FriParams {
     #[inline]
     pub fn num_rounds(&self, log_domain_size: u8) -> usize {
         // Final domain size = final_degree × blowup = 2^(log_final_degree + log_blowup).
-        // Safety: PcsParams::new() validates this sum does not exceed MAX_LOG_DOMAIN_SIZE.
-        debug_assert!(
-            (self.log_final_degree as u16 + self.log_blowup as u16)
-                <= crate::pcs::params::MAX_LOG_DOMAIN_SIZE as u16,
-            "log_final_degree + log_blowup overflows; construct FriParams via PcsParams::new()",
-        );
+        // Field-relative bounds (log_final_degree + log_blowup ≤ F::TWO_ADICITY)
+        // are enforced when the initial subgroup is constructed; if we got a
+        // valid `log_domain_size` here, the chain is by construction in bounds.
         let log_max_final_size = self.log_final_degree + self.log_blowup;
         // Number of times we need to divide by 2^log_folding_factor
         log_domain_size

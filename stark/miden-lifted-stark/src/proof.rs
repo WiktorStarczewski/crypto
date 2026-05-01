@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
+    domain::{Coset, LiftedDomain},
     instance::{AirInstance, InstanceShapes, validate_air_order, validate_inputs},
     lmcs::{Lmcs, utils::aligned_len},
     pcs::proof::PcsTranscript,
@@ -222,10 +222,9 @@ where
         // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
         let constraint_degree =
             instances.iter().map(|(air, _)| air.constraint_degree()).max().unwrap_or(2);
-        let log_lde_height = log_max_trace_height + log_blowup;
 
         // Max LDE coset (for the largest trace, no lifting)
-        let max_lde_coset = LiftedCoset::unlifted(log_max_trace_height, log_blowup);
+        let max_lde_domain = LiftedDomain::<L::F>::canonical(log_max_trace_height, log_blowup);
 
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();
@@ -260,8 +259,8 @@ where
         let quotient_commit = channel.receive_commitment()?.clone();
 
         // 7. Sample OOD point (outside max trace domain H and max LDE coset gK)
-        let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-        let h = L::F::two_adic_generator(log_max_trace_height.into());
+        let z: EF = max_lde_domain.sample_ood_point(&mut channel);
+        let h = max_lde_domain.trace_subgroup().generator();
         let z_next = z * h;
 
         // 8. Build commitment widths for PCS.
@@ -291,7 +290,7 @@ where
             config.pcs(),
             config.lmcs(),
             &commitments,
-            log_lde_height,
+            &max_lde_domain,
             [z, z_next],
             &mut channel,
         )?;
