@@ -223,7 +223,6 @@ where
     // 6. Sample OOD point (outside max trace domain H and max LDE coset gK)
     let z: EF = max_lde_coset.sample_ood_point(&mut channel);
     let h = F::two_adic_generator(log_max_trace_height.into());
-    let z_next = z * h;
 
     // 7. Widths per commitment group (unpadded data widths).
     let main_widths: Vec<usize> = instances.iter().map(|(air, _)| air.width()).collect();
@@ -239,13 +238,15 @@ where
         (quotient_commit, quotient_widths),
     ];
 
-    // 8. Verify PCS openings (returns per-matrix RowMajorMatrix<EF>, truncated to original widths)
-    let opened = verify_aligned::<F, EF, SC::Lmcs, _, 2>(
+    // 8. Verify PCS openings at (z, h·z) (returns per-matrix RowMajorMatrix<EF> with two rows,
+    // truncated to original widths).
+    let opened = verify_aligned::<F, EF, SC::Lmcs, _>(
         config.pcs(),
         config.lmcs(),
         &commitments,
         log_lde_height,
-        [z, z_next],
+        z,
+        h,
         &mut channel,
     )?;
 

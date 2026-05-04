@@ -261,8 +261,6 @@ where
 
         // 7. Sample OOD point (outside max trace domain H and max LDE coset gK)
         let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-        let h = L::F::two_adic_generator(log_max_trace_height.into());
-        let z_next = z * h;
 
         // 8. Build commitment widths for PCS.
         //
@@ -287,12 +285,11 @@ where
         ];
 
         // 9. Parse PCS sub-transcript
-        let pcs_transcript = PcsTranscript::from_verifier_channel::<_, 2>(
+        let pcs_transcript = PcsTranscript::from_verifier_channel::<_>(
             config.pcs(),
             config.lmcs(),
             &commitments,
             log_lde_height,
-            [z, z_next],
             &mut channel,
         )?;
 

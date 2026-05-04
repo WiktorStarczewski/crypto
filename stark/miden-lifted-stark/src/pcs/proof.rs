@@ -50,12 +50,11 @@ where
     /// `log_lde_height` is the log₂ of the LDE evaluation domain height (i.e. the height of
     /// the committed LDE matrices). When a trace degree is known, it is typically
     /// `log_trace_height + params.fri.log_blowup` (plus any extension used by the caller).
-    pub fn from_verifier_channel<Ch, const N: usize>(
+    pub fn from_verifier_channel<Ch>(
         params: &PcsParams,
         lmcs: &L,
         commitments: &[(L::Commitment, Vec<usize>)],
         log_lde_height: u8,
-        eval_points: [EF; N],
         channel: &mut Ch,
     ) -> Result<Self, TranscriptError>
     where
@@ -65,10 +64,12 @@ where
             return Err(TranscriptError::NoMoreFields);
         }
 
+        // Number of OOD opening points: always 2 (`z` and `h·z`) for the lifted STARK PCS.
+        const NUM_EVAL_POINTS: usize = 2;
         let deep_transcript = DeepTranscript::from_verifier_channel::<Ch>(
             &params.deep,
             commitments,
-            eval_points.len(),
+            NUM_EVAL_POINTS,
             channel,
         )?;
 

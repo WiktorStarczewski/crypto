@@ -21,7 +21,7 @@ use miden_lifted_stark::{
 use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::Field;
+use p3_field::{Field, TwoAdicField};
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
@@ -80,18 +80,19 @@ fn main() {
 
         let mut challenger = test_challenger();
         challenger.observe(commitment);
-        let z1: QuadFelt = challenger.sample_algebra_element();
-        let z2: QuadFelt = challenger.sample_algebra_element();
+        let z: QuadFelt = challenger.sample_algebra_element();
+        let h = Felt::two_adic_generator((log_lde_height - params.log_blowup()) as usize);
         let mut channel = ProverTranscript::new(challenger);
 
         let trace_trees: &[&_] = &[&tree];
 
         let start = Instant::now();
-        open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
+        open_with_channel::<Felt, QuadFelt, _, _, _>(
             &params,
             &lmcs,
             log_lde_height,
-            [z1, z2],
+            z,
+            h,
             trace_trees,
             &mut channel,
         );

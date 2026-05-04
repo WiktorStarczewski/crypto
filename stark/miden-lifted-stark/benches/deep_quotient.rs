@@ -25,7 +25,7 @@ use miden_lifted_stark::{
         generate_matrices_from_specs, total_elements,
     },
 };
-use p3_field::FieldArray;
+use p3_field::TwoAdicField;
 use p3_matrix::dense::RowMajorMatrix;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, rngs::SmallRng};
 
@@ -59,25 +59,19 @@ fn bench_deep_quotient(c: &mut Criterion) {
         let matrices_refs: Vec<Vec<_>> =
             trees.iter().map(|tree| tree.leaves().iter().collect()).collect();
 
-        // Benchmark: batch_eval_lifted with 1 point
-        group.bench_function(BenchmarkId::from_parameter("batch_eval/N1"), |b| {
+        // Benchmark: barycentric eval at the (z, h·z) opening pair used by lifted STARKs.
+        let log_max_trace_height = log_lde_height - LOG_BLOWUP;
+        let h = Felt::two_adic_generator(log_max_trace_height as usize);
+        group.bench_function(BenchmarkId::from_parameter("batch_eval/(z, h·z)"), |b| {
             let mut rng = SmallRng::seed_from_u64(789);
             b.iter(|| {
                 let z: QuadFelt = rng.sample(StandardUniform);
-                let quotient =
-                    PointQuotients::<Felt, QuadFelt, 1>::new(FieldArray([z]), &coset_points);
-                black_box(quotient.batch_eval_lifted(&matrices_refs, &coset_points, LOG_BLOWUP))
-            });
-        });
-
-        // Benchmark: batch_eval_lifted with 2 points
-        group.bench_function(BenchmarkId::from_parameter("batch_eval/N2"), |b| {
-            let mut rng = SmallRng::seed_from_u64(789);
-            b.iter(|| {
-                let z1: QuadFelt = rng.sample(StandardUniform);
-                let z2: QuadFelt = rng.sample(StandardUniform);
-                let quotient =
-                    PointQuotients::<Felt, QuadFelt, 2>::new(FieldArray([z1, z2]), &coset_points);
+                let quotient = PointQuotients::<Felt, QuadFelt>::from_z_and_hz(
+                    z,
+                    h,
+                    LOG_BLOWUP,
+                    &coset_points,
+                );
                 black_box(quotient.batch_eval_lifted(&matrices_refs, &coset_points, LOG_BLOWUP))
             });
         });

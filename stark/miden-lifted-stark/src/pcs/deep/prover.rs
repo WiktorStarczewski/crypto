@@ -45,17 +45,22 @@ pub struct DeepPoly<EF> {
 }
 
 impl<EF> DeepPoly<EF> {
-    /// Construct `Q(X)` by evaluating trace trees at the opening points.
+    /// Construct `Q(X)` by evaluating trace trees at `(z, h·z)`.
     ///
-    /// This computes the LDE coset points from the trace tree height, evaluates the committed
-    /// matrices at `eval_points`, and then calls [`Self::from_evals`].
+    /// `h` must be the trace generator (a primitive `2^log_max_trace_height`-th root
+    /// of unity). The two opening points `z` and `h·z` correspond to the local and
+    /// next-row evaluations needed for STARK transition constraints.
     ///
-    /// Preconditions: `eval_points` must be distinct and lie outside the trace subgroup `H`
-    /// and LDE evaluation coset `gK`. The outer protocol is expected to enforce this.
-    pub fn from_trees<L, M, const N: usize, Ch>(
+    /// Uses [`PointQuotients::from_z_and_hz`] to derive the `h·z` denominators from
+    /// those for `z` without a second batch inversion.
+    ///
+    /// Preconditions: `z` and `h·z` must be distinct and lie outside the trace
+    /// subgroup `H` and LDE evaluation coset `gK`. The outer protocol enforces this.
+    pub fn from_trees<L, M, Ch>(
         params: DeepParams,
         trace_trees: &[&L::Tree<M>],
-        eval_points: [EF; N],
+        z: EF,
+        h: L::F,
         log_blowup: u8,
         channel: &mut Ch,
     ) -> Self
@@ -78,24 +83,24 @@ impl<EF> DeepPoly<EF> {
         let matrices_groups: Vec<Vec<&M>> =
             trace_trees.iter().map(|tree| tree.leaves().iter().collect()).collect();
 
-        let quotient = PointQuotients::new(FieldArray::from(eval_points), &coset_points);
+        let quotient = PointQuotients::from_z_and_hz(z, h, log_blowup, &coset_points);
         let batched_evals = info_span!("evaluate at OOD points")
             .in_scope(|| quotient.batch_eval_lifted(&matrices_groups, &coset_points, log_blowup));
 
         let (deep_poly, _evals) =
-            Self::from_evals::<L, M, N, Ch>(params, trace_trees, batched_evals, &quotient, channel);
+            Self::from_evals::<L, M, Ch>(params, trace_trees, batched_evals, &quotient, channel);
         deep_poly
     }
 
-    /// Construct `Q(X)` from committed matrices and batched evaluations at N opening points.
+    /// Construct `Q(X)` from committed matrices and batched evaluations at `(z, h·z)`.
     ///
     /// # Arguments
     /// - `trace_trees`: Trace trees used to derive alignment and matrix groups. All trees must
     ///   share the same alignment; mixed alignments are not supported.
-    /// - `batched_evals`: One row per matrix, each row holding `FieldArray<EF, N>` per column.
-    ///   Widths match the unpadded matrices; alignment padding is applied lazily during channel
-    ///   writes and Horner reduction.
-    /// - `quotient`: Precomputed `1/(zⱼ − xᵢ)` for all opening points zⱼ and domain points xᵢ.
+    /// - `batched_evals`: One row per matrix, each row holding `FieldArray<EF, 2>` per column —
+    ///   `[eval at z, eval at h·z]`. Widths match the unpadded matrices; alignment padding is
+    ///   applied lazily during channel writes and Horner reduction.
+    /// - `quotient`: Precomputed `1/(z − xᵢ)` and `1/(h·z − xᵢ)` for all domain points xᵢ.
     ///
     /// Returns the constructed `DeepPoly` and the (unaligned) `batched_evals` for test inspection.
     ///
@@ -106,13 +111,13 @@ impl<EF> DeepPoly<EF> {
     ///
     /// Implementation note: we fuse a sign change into the per-column coefficient stream
     /// so reduction and quotient assembly can share a single traversal over the domain.
-    pub fn from_evals<L, M, const N: usize, Ch>(
+    pub fn from_evals<L, M, Ch>(
         params: DeepParams,
         trace_trees: &[&L::Tree<M>],
-        batched_evals: RowList<FieldArray<EF, N>>,
-        quotient: &PointQuotients<L::F, EF, N>,
+        batched_evals: RowList<FieldArray<EF, 2>>,
+        quotient: &PointQuotients<L::F, EF>,
         channel: &mut Ch,
-    ) -> (Self, RowList<FieldArray<EF, N>>)
+    ) -> (Self, RowList<FieldArray<EF, 2>>)
     where
         L: Lmcs,
         L::F: TwoAdicField,
@@ -142,7 +147,7 @@ impl<EF> DeepPoly<EF> {
         //    claims to the challenges. Each matrix row is zero-padded to the tree alignment,
         //    matching the virtual zero columns the LMCS inserts when hashing rows. All matrices are
         //    concatenated into a single flat slice per eval point.
-        for point_idx in 0..N {
+        for point_idx in 0..2 {
             let flat: Vec<EF> =
                 batched_evals.iter_aligned(alignment).map(|fa| fa[point_idx]).collect();
             channel.send_algebra_slice(&flat);
@@ -156,9 +161,9 @@ impl<EF> DeepPoly<EF> {
         let challenge_columns: EF = channel.sample_algebra_element();
         let challenge_points: EF = channel.sample_algebra_element();
 
-        // Pre-compute f_reduced(zⱼ) for all N points using Horner.
+        // Pre-compute f_reduced(z) and f_reduced(h·z) using Horner.
         // Reduces across all matrices' aligned columns in flat order.
-        let f_reduced_at_points: FieldArray<EF, N> =
+        let f_reduced_at_points: FieldArray<EF, 2> =
             horner(challenge_columns, batched_evals.iter_aligned(alignment));
 
         let w = <L::F as Field>::Packing::WIDTH;
@@ -225,27 +230,25 @@ impl<EF> DeepPoly<EF> {
                 })
                 .unwrap_or_else(|| EF::zero_vec(n));
 
-            // Pre-compute βʲ for all N points
-            let point_coeffs: [EF; N] =
-                core::array::from_fn(|j| challenge_points.exp_u64(j as u64));
+            // β⁰ = 1 and β¹ = challenge_points; only the second power is used below.
+            let point_coeffs: [EF; 2] = [EF::ONE, challenge_points];
 
             // Transform neg_f_reduced in-place into deep_evals.
-            // Q(x) = Σⱼ βʲ·qⱼ(x)·(f_reduced(zⱼ) + neg_f_reduced(x))
+            // Q(x) = q₀(x)·(f_reduced(z) + neg_f_reduced(x))
+            //      + β·q₁(x)·(f_reduced(h·z) + neg_f_reduced(x))
             if w == 1 || n < w {
                 neg_f_reduced
                     .par_iter_mut()
                     .zip(point_quotient.par_iter())
                     .for_each(|(neg, q)| {
                         let mut result = q[0] * (f_reduced_at_points[0] + *neg);
-                        for j in 1..N {
-                            result += point_coeffs[j] * q[j] * (f_reduced_at_points[j] + *neg);
-                        }
+                        result += point_coeffs[1] * q[1] * (f_reduced_at_points[1] + *neg);
                         *neg = result;
                     });
             } else {
-                let f_reduced_packed: [EF::ExtensionPacking; N] =
+                let f_reduced_packed: [EF::ExtensionPacking; 2] =
                     f_reduced_at_points.0.map(EF::ExtensionPacking::from);
-                let point_coeffs_packed: [EF::ExtensionPacking; N] =
+                let point_coeffs_packed: [EF::ExtensionPacking; 2] =
                     point_coeffs.map(EF::ExtensionPacking::from);
 
                 neg_f_reduced
@@ -256,20 +259,15 @@ impl<EF> DeepPoly<EF> {
 
                         // Transpose quotients: q_chunk[lane][point] -> q_packed[point] packs all
                         // lanes
-                        let q_packed: [EF::ExtensionPacking; N] =
+                        let q_packed: [EF::ExtensionPacking; 2] =
                             EF::ExtensionPacking::pack_ext_columns(FieldArray::as_raw_slice(
                                 q_chunk,
                             ));
 
-                        // First point (j=0) has coefficient β⁰ = 1, compute directly
+                        // β⁰ = 1 (point 0), β¹ = challenge_points (point 1).
                         let mut result_p = q_packed[0] * (f_reduced_packed[0] + neg_p);
-
-                        // Remaining points (j>0) multiply by βʲ
-                        for j in 1..N {
-                            result_p += point_coeffs_packed[j]
-                                * q_packed[j]
-                                * (f_reduced_packed[j] + neg_p);
-                        }
+                        result_p +=
+                            point_coeffs_packed[1] * q_packed[1] * (f_reduced_packed[1] + neg_p);
                         result_p.to_ext_slice(neg_chunk);
                     });
             }

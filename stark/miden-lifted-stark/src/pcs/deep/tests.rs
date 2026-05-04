@@ -2,6 +2,7 @@
 
 use alloc::vec;
 
+use p3_field::TwoAdicField;
 use proof::DeepTranscript;
 use prover::DeepPoly;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
@@ -28,9 +29,12 @@ fn deep_quotient_end_to_end() {
     let lde_height = 1 << log_lde_height as usize;
 
     let params = DeepParams { deep_pow_bits: 1 };
-    // Two random opening points
-    let z1: QuadFelt = rng.sample(StandardUniform);
-    let z2: QuadFelt = rng.sample(StandardUniform);
+    // OOD point z plus the trace-shifted point h·z (transition-constraint convention).
+    let log_max_trace_height = log_lde_height - log_blowup;
+    let z: QuadFelt = rng.sample(StandardUniform);
+    let h = Felt::two_adic_generator(log_max_trace_height as usize);
+    let z1 = z;
+    let z2 = z * h;
 
     // Create matrices of varying heights (ascending order required)
     // specs: (log_scaling, width) where height = n >> log_scaling
@@ -51,10 +55,11 @@ fn deep_quotient_end_to_end() {
     // Step 3: Prover constructs DeepPoly (handles observe, grind, sample internally)
     let mut prover_channel = prover_channel_with_commitment(&commitment);
     let trace_trees: &[&_] = &[&tree];
-    let deep_poly = DeepPoly::from_trees::<BaseLmcs, _, 2, _>(
+    let deep_poly = DeepPoly::from_trees::<BaseLmcs, _, _>(
         params,
         trace_trees,
-        [z1, z2],
+        z,
+        h,
         log_blowup,
         &mut prover_channel,
     );

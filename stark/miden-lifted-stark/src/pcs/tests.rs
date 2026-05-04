@@ -4,7 +4,7 @@ use alloc::{vec, vec::Vec};
 
 use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
 use p3_challenger::CanObserve;
-use p3_field::Field;
+use p3_field::{Field, TwoAdicField};
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use params::PcsParams;
 use proof::PcsTranscript;
@@ -48,7 +48,11 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
 
     let lde_height = trees[0].leaves().last().map(Matrix::height).unwrap_or(0);
     let log_lde_height = log2_strict_u8(lde_height);
-    let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
+    // Opening points: random `z` plus the trace-shifted `h·z`, matching the
+    // local/next-row convention enforced by the specialized PCS API.
+    let log_max_trace_height = log_lde_height - params.log_blowup();
+    let z: QuadFelt = rng.sample(StandardUniform);
+    let h = Felt::two_adic_generator(log_max_trace_height as usize);
 
     let commitments: Vec<_> = trees.iter().map(|t| (t.root(), t.widths())).collect();
     let trace_trees: Vec<&_> = trees.iter().collect();
@@ -60,11 +64,12 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     }
     let mut prover_channel = ProverTranscript::new(challenger);
 
-    open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
+    open_with_channel::<Felt, QuadFelt, _, _, _>(
         params,
         &lmcs,
         log_lde_height,
-        eval_points,
+        z,
+        h,
         &trace_trees,
         &mut prover_channel,
     );
@@ -77,12 +82,13 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     }
     let mut verifier_channel = VerifierTranscript::from_data(challenger, &transcript);
 
-    let result = verify_aligned::<Felt, QuadFelt, _, _, 2>(
+    let result = verify_aligned::<Felt, QuadFelt, _, _>(
         params,
         &lmcs,
         &commitments,
         log_lde_height,
-        eval_points,
+        z,
+        h,
         &mut verifier_channel,
     );
 
@@ -104,12 +110,11 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
         }
         let mut reparse_channel = VerifierTranscript::from_data(challenger, &transcript);
 
-        PcsTranscript::<QuadFelt, BaseLmcs>::from_verifier_channel::<_, 2>(
+        PcsTranscript::<QuadFelt, BaseLmcs>::from_verifier_channel::<_>(
             params,
             &lmcs,
             &aligned_commitments,
             log_lde_height,
-            eval_points,
             &mut reparse_channel,
         )
         .expect("PcsTranscript re-parse should succeed");

@@ -12,12 +12,16 @@ use crate::{
     pcs::{deep::prover::DeepPoly, fri::prover::FriPolys, params::PcsParams},
 };
 
-/// Open committed matrices at N evaluation points, writing to a prover channel.
+/// Open committed matrices at `(z, h·z)`, writing to a prover channel.
+///
+/// `h` must be the trace generator (a primitive `2^log_max_trace_height`-th root of unity)
+/// — equivalently `ω_lde^blowup`. The two opening points correspond to the local and
+/// next-row evaluations required by STARK transition constraints.
 ///
 /// # Preconditions
-/// - `eval_points` must lie outside both the trace-domain subgroup `H` and the LDE evaluation coset
-///   `gK` used by the PCS. If a point lies in either set, denominators `(zⱼ − X)` in the DEEP
-///   quotient become zero for some domain element, making the quotient undefined.
+/// - `z` and `h·z` must lie outside both the trace-domain subgroup `H` and the LDE evaluation
+///   coset `gK` used by the PCS. If a point lies in either set, denominators `(z_j − X)` in the
+///   DEEP quotient become zero for some domain element, making the quotient undefined.
 /// - All trace trees must be built at the same LDE height `2^log_lde_height`. Multiple LDE heights
 ///   are not supported yet and will panic.
 ///
@@ -30,11 +34,12 @@ use crate::{
 /// Alignment is derived from the trace trees to pad DEEP evaluations consistently.
 /// Trace trees must be built with `build_aligned_tree` to match this padding.
 #[instrument(name = "PCS opening", skip_all)]
-pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
+pub fn open_with_channel<F, EF, L, M, Ch>(
     params: &PcsParams,
     lmcs: &L,
     log_lde_height: u8,
-    eval_points: [EF; N],
+    z: EF,
+    h: F,
     trace_trees: &[&L::Tree<M>],
     channel: &mut Ch,
 ) where
@@ -44,8 +49,6 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
     M: Matrix<F>,
     Ch: ProverChannel<F = F, Commitment = L::Commitment>,
 {
-    const { assert!(N > 0, "at least one evaluation point required") };
-
     // Determine LDE domain size from the supplied LDE height.
     // For now, all trace trees must share this height; mixed LDE heights are not supported yet.
     assert!(!trace_trees.is_empty(), "at least one trace tree required");
@@ -58,10 +61,11 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
     // Construct DEEP quotient (observes evals, grinds, samples alpha and beta)
     // ─────────────────────────────────────────────────────────────────────────
     let deep_poly = info_span!("DEEP quotient").in_scope(|| {
-        DeepPoly::from_trees::<L, M, N, Ch>(
+        DeepPoly::from_trees::<L, M, Ch>(
             params.deep,
             trace_trees,
-            eval_points,
+            z,
+            h,
             params.fri.log_blowup,
             channel,
         )

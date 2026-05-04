@@ -32,7 +32,11 @@ use crate::{
     },
 };
 
-/// Verify polynomial evaluation claims against commitments.
+/// Verify polynomial evaluation claims at `(z, h·z)` against commitments.
+///
+/// `h` must be the trace generator (a primitive `2^log_max_trace_height`-th root of unity).
+/// The two opening points correspond to the local and next-row evaluations required by
+/// STARK transition constraints.
 ///
 /// Commitment widths must match the committed rows (including any alignment padding
 /// from `build_aligned_tree`). The PCS is alignment-agnostic; callers that use
@@ -45,19 +49,21 @@ use crate::{
 /// enforce transcript exhaustion.
 ///
 /// # Preconditions
-/// - `eval_points` must lie outside both the trace-domain subgroup `H` and the LDE evaluation coset
-///   `gK`. Otherwise denominators `(zⱼ − X)` in the DEEP quotient become zero, making it undefined.
+/// - `z` and `h·z` must lie outside both the trace-domain subgroup `H` and the LDE evaluation
+///   coset `gK`. Otherwise denominators `(z_j − X)` in the DEEP quotient become zero, making it
+///   undefined.
 /// - All commitments must be lifted to the same LDE height `2^log_lde_height`.
 ///
 /// # Returns
-/// `opened[group][matrix]` as a `RowMajorMatrix<EF>` with `N` rows
-/// (one per evaluation point), using the same widths that were passed in.
-pub fn verify<F, EF, L, Ch, const N: usize>(
+/// `opened[group][matrix]` as a `RowMajorMatrix<EF>` with two rows (`z` and `h·z`),
+/// using the same widths that were passed in.
+pub fn verify<F, EF, L, Ch>(
     params: &PcsParams,
     lmcs: &L,
     commitments: &[(L::Commitment, Vec<usize>)],
     log_lde_height: u8,
-    eval_points: [EF; N],
+    z: EF,
+    h: F,
     channel: &mut Ch,
 ) -> Result<OpenedValues<EF>, PcsError>
 where
@@ -66,13 +72,12 @@ where
     L: Lmcs<F = F>,
     Ch: VerifierChannel<F = F, Commitment = L::Commitment>,
 {
-    const { assert!(N > 0, "at least one evaluation point required") };
-
     if commitments.is_empty() {
         return Err(PcsError::NoCommitments);
     }
 
     // Construct verifier's DEEP oracle (observes evals, checks PoW, samples α/β)
+    let eval_points = [z, z * h];
     let (deep_oracle, evals) = DeepOracle::<F, EF, L>::new(
         params.deep,
         &eval_points,
@@ -109,12 +114,13 @@ where
 /// 1. Aligns widths to `lmcs.alignment()`
 /// 2. Calls [`verify`] with aligned widths
 /// 3. Truncates returned evals back to original widths
-pub fn verify_aligned<F, EF, L, Ch, const N: usize>(
+pub fn verify_aligned<F, EF, L, Ch>(
     params: &PcsParams,
     lmcs: &L,
     commitments: &[(L::Commitment, Vec<usize>)],
     log_lde_height: u8,
-    eval_points: [EF; N],
+    z: EF,
+    h: F,
     channel: &mut Ch,
 ) -> Result<OpenedValues<EF>, PcsError>
 where
@@ -129,7 +135,7 @@ where
         .map(|(c, widths)| (c.clone(), aligned_widths(widths.clone(), alignment)))
         .collect();
 
-    let evals = verify(params, lmcs, &aligned_commitments, log_lde_height, eval_points, channel)?;
+    let evals = verify(params, lmcs, &aligned_commitments, log_lde_height, z, h, channel)?;
 
     // Truncate each matrix back to original widths, removing alignment padding.
     let truncated = evals

@@ -395,17 +395,17 @@ where
     // 8. Sample OOD point (outside H and gK)
     let z: EF = max_lde_coset.sample_ood_point(&mut channel);
     let h = F::two_adic_generator(log_max_trace_height.into());
-    let z_next = z * h;
 
-    // 9. Open via PCS
+    // 9. Open via PCS at (z, h·z)
     let trees = vec![main_committed.tree(), aux_committed.tree(), quotient_committed.tree()];
 
     info_span!("open").in_scope(|| {
-        open_with_channel::<F, EF, SC::Lmcs, RowMajorMatrix<F>, _, 2>(
+        open_with_channel::<F, EF, SC::Lmcs, RowMajorMatrix<F>, _>(
             config.pcs(),
             config.lmcs(),
             log_lde_height,
-            [z, z_next],
+            z,
+            h,
             &trees,
             &mut channel,
         )

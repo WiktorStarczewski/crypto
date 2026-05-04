@@ -18,7 +18,7 @@ use miden_lifted_stark::{
 use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::Field;
+use p3_field::{Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 fn bench_pcs(c: &mut Criterion) {
@@ -53,20 +53,22 @@ fn bench_pcs(c: &mut Criterion) {
         let base_challenger = test_challenger();
 
         {
+            let log_max_trace_height = log_lde_height - BENCH_PCS_PARAMS.log_blowup();
+            let h = Felt::two_adic_generator(log_max_trace_height as usize);
             group.bench_function("open", |b| {
                 b.iter(|| {
                     let mut challenger = base_challenger.clone();
                     challenger.observe(commitment);
-                    let z1: QuadFelt = challenger.sample_algebra_element();
-                    let z2: QuadFelt = challenger.sample_algebra_element();
+                    let z: QuadFelt = challenger.sample_algebra_element();
                     let mut channel = ProverTranscript::new(challenger);
 
                     let trace_trees: &[&_] = &[&tree];
-                    open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
+                    open_with_channel::<Felt, QuadFelt, _, _, _>(
                         &BENCH_PCS_PARAMS,
                         &lmcs,
                         log_lde_height,
-                        [z1, z2],
+                        z,
+                        h,
                         trace_trees,
                         &mut channel,
                     );

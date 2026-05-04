@@ -32,7 +32,7 @@ use p3_blake3::Blake3;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs, Pcs};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{Field, coset::TwoAdicMultiplicativeCoset};
+use p3_field::{Field, TwoAdicField, coset::TwoAdicMultiplicativeCoset};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_keccak::KeccakF;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -268,20 +268,22 @@ fn bench_pcs_open(c: &mut Criterion) {
             let base_challenger = gl::test_challenger();
 
             {
+                let log_max_trace_height = log_lde_height - BENCH_PCS_PARAMS.log_blowup();
+                let h = gl::Felt::two_adic_generator(log_max_trace_height as usize);
                 group.bench_function(BenchmarkId::from_parameter("lifted"), |b| {
                     b.iter(|| {
                         let mut challenger = base_challenger.clone();
                         challenger.observe(commitment);
-                        let z1: gl::QuadFelt = challenger.sample_algebra_element();
-                        let z2: gl::QuadFelt = challenger.sample_algebra_element();
+                        let z: gl::QuadFelt = challenger.sample_algebra_element();
                         let mut channel = ProverTranscript::new(challenger);
 
                         let trace_trees: &[&_] = &[&tree];
-                        open_with_channel::<gl::Felt, gl::QuadFelt, _, _, _, 2>(
+                        open_with_channel::<gl::Felt, gl::QuadFelt, _, _, _>(
                             &BENCH_PCS_PARAMS,
                             &lmcs,
                             log_lde_height,
-                            [z1, z2],
+                            z,
+                            h,
                             trace_trees,
                             &mut channel,
                         );
