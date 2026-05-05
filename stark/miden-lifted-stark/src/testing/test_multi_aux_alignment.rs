@@ -54,10 +54,6 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let start = builder.public_values()[0];

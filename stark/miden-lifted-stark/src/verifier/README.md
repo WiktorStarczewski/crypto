@@ -12,11 +12,11 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 |------|---------|
 | `verify_single` | Verify a single-AIR proof |
 | `verify_multi` | Verify a multi-trace proof |
-| `AirInstance` | Public values + variable-length inputs for one AIR |
+| `AirInstance` | Public values + external public inputs for one AIR |
 | `StarkProof` | Log trace heights + raw transcript data |
 
 ```text
-verify_single(config, air, public_values, var_len_public_inputs, proof, challenger)
+verify_single(config, air, public_values, external_public_inputs, proof, challenger)
 verify_multi(config, &[(air, instance), ...], proof, challenger)
 ```
 

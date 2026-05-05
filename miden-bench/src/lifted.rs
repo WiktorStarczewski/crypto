@@ -65,10 +65,6 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
         }
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Keccak(a) => LiftedAir::<Felt, EF>::eval(a, builder),
@@ -145,7 +141,7 @@ where
                         air,
                         AirInstance {
                             public_values: &[],
-                            var_len_public_inputs: &[],
+                            external_public_inputs: &[],
                         },
                     )
                 })

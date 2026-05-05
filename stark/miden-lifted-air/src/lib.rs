@@ -4,7 +4,7 @@
 //! - [`LiftedAir`]: Super-trait for AIR definitions (inherits upstream + adds aux trace support and
 //!   periodic column data)
 //! - [`LiftedAirBuilder`]: Super-trait for constraint builders
-//! - [`auxiliary`]: Auxiliary trace types (builder, cross-AIR identity checking).
+//! - [`auxiliary`]: Auxiliary trace types (aux builder and external assertion evaluation).
 
 #![no_std]
 
@@ -16,7 +16,7 @@ mod builder;
 mod util;
 
 pub use air::{AirStructureError, LiftedAir, TracePart};
-pub use auxiliary::{AuxBuilder, ReducedAuxValues, ReductionError, VarLenPublicInputs};
+pub use auxiliary::{AuxBuilder, ReductionError};
 pub use builder::LiftedAirBuilder;
 pub use util::log2_strict_u8;
 

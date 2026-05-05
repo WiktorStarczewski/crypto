@@ -45,9 +45,7 @@ use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
 use constraints::{ConstraintFolder, reconstruct_quotient, row_to_packed_ext};
-use miden_lifted_air::{
-    LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
-};
+use miden_lifted_air::{LiftedAir, ReductionError, RowWindow};
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
@@ -80,9 +78,15 @@ pub enum VerifierError {
          log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
     )]
     ConstraintDegreeTooHigh { log_quotient_degree: u8, log_blowup: u8 },
-    #[error("global reduced aux identity check failed")]
-    InvalidReducedAux,
-    #[error("aux value reduction failed: {0}")]
+    #[error("external assertion {assertion} of caller instance {caller_instance} is non-zero")]
+    ExternalAssertionFailed {
+        /// Caller's original index for the failing instance.
+        caller_instance: usize,
+        /// Index into the assertions vector returned by
+        /// [`LiftedAir::eval_external`].
+        assertion: usize,
+    },
+    #[error("external assertion evaluation failed: {0}")]
     Reduction(ReductionError),
 }
 
@@ -94,7 +98,7 @@ pub fn verify_single<F, EF, A, SC>(
     config: &SC,
     air: &A,
     public_values: &[F],
-    var_len_public_inputs: VarLenPublicInputs<'_, F>,
+    external_public_inputs: &[F],
     proof: &StarkProof<F, EF, SC>,
     challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
@@ -104,7 +108,7 @@ where
     SC: StarkConfig<F, EF>,
     A: LiftedAir<F, EF>,
 {
-    let instance = AirInstance { public_values, var_len_public_inputs };
+    let instance = AirInstance { public_values, external_public_inputs };
     verify_multi(config, &[(air, instance)], proof, challenger)
 }
 
@@ -113,8 +117,8 @@ where
 /// The verifier uses [`InstanceShapes::air_order`](crate::InstanceShapes::air_order) from the proof
 /// to match the caller's instances to the proof's ordering. The caller's challenger
 /// must already be bound to the full statement (protocol parameters, AIR
-/// configurations, AIR ordering, and public inputs — both fixed and
-/// variable-length) — see the prover module-level docs.
+/// configurations, AIR ordering, and public inputs — both `public_values` and
+/// `external_public_inputs`) — see the prover module-level docs.
 ///
 /// The verifier mirrors the prover's protocol:
 ///
@@ -262,7 +266,6 @@ where
     debug_assert_eq!(opened[main_g].len(), instances.len());
     debug_assert_eq!(opened[aux_g].len(), instances.len());
     let mut accumulated = EF::ZERO;
-    let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
     for (j, (air, inst)) in instances.iter().enumerate() {
         let coset_j = LiftedCoset::new(log_trace_heights[j], log_blowup, log_max_trace_height);
@@ -307,16 +310,26 @@ where
         // Accumulate: acc = acc * beta + folded_j
         accumulated = accumulated * beta + folder.accumulator;
 
-        // Compute reduced aux contribution and accumulate.
-        let contribution = air
-            .reduced_aux_values(
+        // Evaluate this AIR's external assertions and check each one is zero.
+        // No batching: each assertion is already a concrete EF value (not a
+        // polynomial), so an individual zero-check is equivalent to any
+        // randomized fold and gives precise error reporting.
+        let assertions = air
+            .eval_external(
                 aux_values_j,
                 &randomness[..num_rand],
                 inst.public_values,
-                inst.var_len_public_inputs,
+                inst.external_public_inputs,
             )
             .map_err(VerifierError::Reduction)?;
-        reduced_aux.combine_in_place(&contribution);
+        for (k, assertion) in assertions.iter().enumerate() {
+            if *assertion != EF::ZERO {
+                return Err(VerifierError::ExternalAssertionFailed {
+                    caller_instance: air_order[j] as usize,
+                    assertion: k,
+                });
+            }
+        }
     }
 
     // 11. Reconstruct Q(z) and check quotient identity Q(z) * Z_{H_max}(z)
@@ -330,11 +343,6 @@ where
         return Err(VerifierError::ConstraintMismatch);
     }
 
-    // 12. Check global reduced aux identity (all bus contributions combine to identity)
-    if !reduced_aux.is_identity() {
-        return Err(VerifierError::InvalidReducedAux);
-    }
-
-    // 13. Finalize transcript: check emptiness and return digest
+    // 12. Finalize transcript: check emptiness and return digest
     Ok(channel.finalize()?)
 }

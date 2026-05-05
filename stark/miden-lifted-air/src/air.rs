@@ -30,7 +30,7 @@ use thiserror::Error;
 
 use crate::{
     LiftedAirBuilder,
-    auxiliary::{ReducedAuxValues, ReductionError, VarLenPublicInputs},
+    auxiliary::ReductionError,
     symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt},
 };
 
@@ -96,51 +96,54 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// [`PermutationAirBuilder::permutation_values`](crate::PermutationAirBuilder::permutation_values).
     fn num_aux_values(&self) -> usize;
 
-    /// Number of variable-length public inputs this AIR expects.
+    /// Evaluate this AIR's external assertions.
     ///
-    /// Each input is a slice of base-field elements that
-    /// [`reduced_aux_values`](Self::reduced_aux_values) reduces to a single value.
-    /// The prover validates that witnesses provide exactly this many slices.
+    /// Returns a list of extension-field values that must all equal zero for
+    /// the proof to be valid. Each value is a polynomial expression in the
+    /// AIR's aux values, challenges, and public inputs (both the flat
+    /// `public_values` and the external public-input slice).
     ///
-    /// Implementors of [`reduced_aux_values`](Self::reduced_aux_values) should verify
-    /// that `var_len_public_inputs` contains exactly this many slices, returning
-    /// [`ReductionError`] otherwise.
-    fn num_var_len_public_inputs(&self) -> usize;
-
-    /// Reduce this AIR's aux values to a [`ReducedAuxValues`] contribution.
-    ///
-    /// Called by the verifier (with concrete field values, not symbolic expressions)
-    /// to compute each AIR's contribution to the global cross-AIR bus identity check.
-    /// The verifier accumulates contributions across all AIRs and checks that the
-    /// combined result is identity (prod=1, sum=0).
+    /// These assertions are checked outside the trace: the verifier evaluates
+    /// each one as a concrete extension-field value and checks it equals zero
+    /// individually. There is no randomized fold — each entry is its own
+    /// equation, so a non-zero entry is reported with its instance and index.
     ///
     /// # Arguments
     /// - `aux_values`: prover-supplied aux values (from the proof)
     /// - `challenges`: extension-field challenges (same as used for aux trace building)
-    /// - `public_values`: this AIR's public values (base field)
-    /// - `var_len_public_inputs`: reducible inputs for the cross-AIR identity check
+    /// - `public_values`: this AIR's public values (base field), also passed to [`eval`](Self::eval)
+    ///   for in-trace constraint evaluation
+    /// - `external_public_inputs`: flat slice of base-field elements consumed only by this method
+    ///   (never inside [`eval`](Self::eval)). The AIR owns the schema — it decides how to slice,
+    ///   group, or stream these elements (length-prefixed sublists, fixed-width matrices, scalar
+    ///   headers, etc.) — and is responsible for its own decode/length checks.
     ///
     /// # Errors
     ///
-    /// The verifier validates instance dimensions (public values length,
-    /// var-len public inputs count) before calling this method, so
-    /// implementations can assume correct input counts. However, the
-    /// *length of each individual var-len slice* is not validated upfront —
-    /// implementations that index into these slices must check lengths
-    /// themselves or use the `Result` return type to report errors.
+    /// The framework imposes no shape on `external_public_inputs`. If the AIR
+    /// expects more elements than the caller supplied, the implementation
+    /// should report this via [`ReductionError`] rather than panicking on
+    /// out-of-bounds indexing.
     ///
-    /// Default: returns identity (correct for AIRs without buses).
-    fn reduced_aux_values(
+    /// # Fiat-Shamir
+    ///
+    /// Callers MUST bind both `public_values` and `external_public_inputs` into
+    /// the Fiat-Shamir challenger before proving/verifying. Both prover and
+    /// verifier MUST absorb the same slice — see the prover docs for the exact
+    /// binding contract.
+    ///
+    /// Default: no external assertions (correct for AIRs that do not need them).
+    fn eval_external(
         &self,
         _aux_values: &[EF],
         _challenges: &[EF],
         _public_values: &[F],
-        _var_len_public_inputs: VarLenPublicInputs<'_, F>,
-    ) -> Result<ReducedAuxValues<EF>, ReductionError>
+        _external_public_inputs: &[F],
+    ) -> Result<Vec<EF>, ReductionError>
     where
         EF: ExtensionField<F>,
     {
-        Ok(ReducedAuxValues::identity())
+        Ok(Vec::new())
     }
 
     /// Return the [`AirLayout`] describing this AIR's dimensions.

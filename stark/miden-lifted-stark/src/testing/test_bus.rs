@@ -1,4 +1,5 @@
-//! Tests reduced auxiliary values (multiset and logup bus identities).
+//! Tests external assertions (multiset and logup bus identities encoded as polynomial
+//! assertions over public inputs).
 
 use alloc::{vec, vec::Vec};
 
@@ -10,7 +11,7 @@ use crate::{
     AirInstance, AirWitness,
     air::{
         AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        ReducedAuxValues, VarLenPublicInputs, WindowAccess,
+        WindowAccess,
     },
     prove_multi,
     testing::configs::goldilocks_poseidon2::{
@@ -20,7 +21,7 @@ use crate::{
 };
 
 // ---------------------------------------------------------------------------
-// BusTestAir: exercises reduced_aux_values with multiset + logup buses.
+// BusTestAir: exercises eval_external with multiset + logup bus-style assertions.
 //
 // Main trace: 1 column, power-of-4 chain (same as TinyAir).
 // Aux trace: 2 constant columns (all rows identical):
@@ -31,14 +32,17 @@ use crate::{
 //   aux_values[0] = col 0 value = 1/(pi_0 + c0)
 //   aux_values[1] = col 1 value = pi_1 + c1
 //
-// reduced_aux_values (verifier-side bus identity check):
-//   Bus 0 (multiset): prod = aux_values[0] * (c0 + pi_0) == 1
-//   Bus 1 (logup):    sum  = (aux_values[1] - c1) - pi_1 == 0
+// eval_external (verifier-side, must all equal zero):
+//   assert_0 (multiset): aux_values[0] * (c0 + pi_0) - 1 == 0
+//   assert_1 (logup):    (aux_values[1] - c1) - pi_1     == 0
 //
 // pi_0, pi_1 appear in two places:
 //   - public_values[1..]: used by eval() for aux trace constraints
-//   - var_len_public_inputs: used by reduced_aux_values() for bus check
+//   - external_public_inputs: used by eval_external() for the assertion check
 // Both must agree for the proof to verify.
+//
+// External-input encoding: a flat slice [pi_0, pi_1] in that order. The AIR
+// owns the schema; the framework imposes no shape.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -67,28 +71,29 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
         2
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        2
-    }
-
-    fn reduced_aux_values(
+    fn eval_external(
         &self,
         aux_values: &[QuadFelt],
         challenges: &[QuadFelt],
         _public_values: &[Felt],
-        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> Result<ReducedAuxValues<QuadFelt>, ReductionError> {
-        // Bus 0 (multiset): prod = aux_values[0] * (challenges[0] + pi_0)
-        // aux_values[0] = 1/(pi_0 + c0), so prod == 1 when pi_0 matches.
-        let pi_0 = QuadFelt::from(var_len_public_inputs[0][0]);
-        let prod = aux_values[0] * (challenges[0] + pi_0);
+        external_public_inputs: &[Felt],
+    ) -> Result<Vec<QuadFelt>, ReductionError> {
+        // Decode the flat slice [pi_0, pi_1].
+        let mut it = external_public_inputs.iter().copied();
+        let pi_0 = it.next().ok_or("external public inputs missing pi_0")?;
+        let pi_1 = it.next().ok_or("external public inputs missing pi_1")?;
+        let pi_0 = QuadFelt::from(pi_0);
+        let pi_1 = QuadFelt::from(pi_1);
 
-        // Bus 1 (logup): sum = (aux_values[1] - challenges[1]) - pi_1
-        // aux_values[1] = pi_1 + c1, so sum == 0 when pi_1 matches.
-        let pi_1 = QuadFelt::from(var_len_public_inputs[1][0]);
-        let sum = (aux_values[1] - challenges[1]) - pi_1;
+        // Multiset assertion: aux_values[0] * (challenges[0] + pi_0) - 1 == 0.
+        // aux_values[0] = 1/(pi_0 + c0), so the product is 1 when pi_0 matches.
+        let multiset = aux_values[0] * (challenges[0] + pi_0) - QuadFelt::ONE;
 
-        Ok(ReducedAuxValues { prod, sum })
+        // Logup assertion: (aux_values[1] - challenges[1]) - pi_1 == 0.
+        // aux_values[1] = pi_1 + c1, so the difference is 0 when pi_1 matches.
+        let logup = (aux_values[1] - challenges[1]) - pi_1;
+
+        Ok(vec![multiset, logup])
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -200,20 +205,18 @@ fn bus_identity_check() {
     let trace = generate_pow4_trace(start, height);
     let public_values = vec![start, pi_0, pi_1];
 
-    // Build var_len_public_inputs (one reducible input per bus)
-    let input_0 = [pi_0];
-    let input_1 = [pi_1];
-    let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
+    // External public inputs: flat slice [pi_0, pi_1].
+    let external_pi = [pi_0, pi_1];
 
     // Prove
     let prover_instances =
-        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
+        [(&air, AirWitness::new(&trace, &public_values, &external_pi), &aux_builder)];
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
     let instance = AirInstance {
         public_values: &public_values,
-        var_len_public_inputs: &var_len_pi,
+        external_public_inputs: &external_pi,
     };
 
     // Verify
@@ -224,7 +227,7 @@ fn bus_identity_check() {
 }
 
 #[test]
-fn bus_wrong_var_len_pi_fails() {
+fn bus_wrong_external_pi_fails() {
     let config = test_config();
 
     let pi_0 = Felt::from_u64(42);
@@ -238,36 +241,33 @@ fn bus_wrong_var_len_pi_fails() {
     let public_values = vec![start, pi_0, pi_1];
 
     // Prove with correct values
-    let input_0 = [pi_0];
-    let input_1 = [pi_1];
-    let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
+    let external_pi = [pi_0, pi_1];
 
     let prover_instances =
-        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
+        [(&air, AirWitness::new(&trace, &public_values, &external_pi), &aux_builder)];
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
-    // Verify with WRONG var_len_public_inputs (99 instead of 42)
+    // Verify with WRONG external_public_inputs (99 instead of 42)
     let wrong_pi_0 = Felt::from_u64(99);
-    let wrong_input_0 = [wrong_pi_0];
-    let wrong_var_len_pi: [&[Felt]; 2] = [&wrong_input_0, &input_1];
+    let wrong_external_pi = [wrong_pi_0, pi_1];
 
     let instance = AirInstance {
         public_values: &public_values,
-        var_len_public_inputs: &wrong_var_len_pi,
+        external_public_inputs: &wrong_external_pi,
     };
 
     let err = verify_multi(&config, &[(&air, instance)], &output.proof, test_challenger())
-        .expect_err("wrong var_len_pi should fail verification");
+        .expect_err("wrong external_pi should fail verification");
 
     assert!(
-        matches!(err, crate::VerifierError::InvalidReducedAux),
-        "expected InvalidReducedAux, got {err:?}"
+        matches!(err, crate::VerifierError::ExternalAssertionFailed { .. }),
+        "expected ExternalAssertionFailed, got {err:?}"
     );
 }
 
 #[test]
-fn bus_wrong_input_count_fails() {
+fn bus_short_external_inputs_fails() {
     let config = test_config();
 
     let pi_0 = Felt::from_u64(42);
@@ -280,33 +280,26 @@ fn bus_wrong_input_count_fails() {
     let trace = generate_pow4_trace(start, height);
     let public_values = vec![start, pi_0, pi_1];
 
-    // Prove with correct values
-    let input_0 = [pi_0];
-    let input_1 = [pi_1];
-    let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
+    let external_pi = [pi_0, pi_1];
 
     let prover_instances =
-        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
+        [(&air, AirWitness::new(&trace, &public_values, &external_pi), &aux_builder)];
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
-    // Verify with WRONG input count (1 instead of 2)
-    let only_one: [&[Felt]; 1] = [&input_0];
+    // Verify with a too-short external slice (1 element instead of 2). The
+    // AIR's decoder runs out of inputs and reports a ReductionError.
+    let too_short = [pi_0];
     let instance = AirInstance {
         public_values: &public_values,
-        var_len_public_inputs: &only_one,
+        external_public_inputs: &too_short,
     };
 
     let err = verify_multi(&config, &[(&air, instance)], &output.proof, test_challenger())
-        .expect_err("wrong input count should fail verification");
+        .expect_err("short external inputs should fail verification");
 
     assert!(
-        matches!(
-            err,
-            crate::VerifierError::Instance(
-                crate::InstanceValidationError::VarLenPublicInputsMismatch { .. }
-            )
-        ),
-        "expected VarLenPublicInputsMismatch, got {err:?}"
+        matches!(err, crate::VerifierError::Reduction(_)),
+        "expected Reduction, got {err:?}"
     );
 }

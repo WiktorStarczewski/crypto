@@ -27,8 +27,9 @@
 //! - **Positive aux width** — every AIR must have an auxiliary trace.
 //! - **Periodic columns** — each has positive, power-of-two length ≤ trace height.
 //! - **Constraint degree** — `log_quotient_degree() ≤ log_blowup`.
-//! - **Instance dimensions** — trace width, public values length, var-len public inputs count, and
-//!   trace height (power of two) all match the AIR specification.
+//! - **Instance dimensions** — trace width, public values length, and trace height (power of two)
+//!   all match the AIR specification. External public inputs are a flat slice with no
+//!   framework-imposed shape; the AIR validates them inside `eval_external`.
 //!
 //! ## Unchecked trust assumptions
 //!
@@ -40,7 +41,8 @@
 //! 3. **Consistent aux builder** — `AuxBuilder::build_aux_trace` returns width = `aux_width()`,
 //!    height = main trace height, and exactly `num_aux_values()` values. (The prover asserts these
 //!    at runtime as a defense-in-depth sanity check.)
-//! 4. **Sound `reduced_aux_values`** — Returns correct bus contributions for valid inputs.
+//! 4. **Sound `eval_external`** — Returns external assertions that are satisfied (equal zero) iff
+//!    the AIR's cross-AIR interactions are well-formed for the given aux values and public inputs.
 
 #![no_std]
 
@@ -164,11 +166,9 @@ pub mod air {
         LiftedAirBuilder,
         PeriodicAirBuilder,
         PermutationAirBuilder,
-        ReducedAuxValues,
         ReductionError,
         RowWindow,
         TracePart,
-        VarLenPublicInputs,
         WindowAccess,
         log2_strict_u8,
     };

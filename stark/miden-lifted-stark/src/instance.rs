@@ -1,6 +1,6 @@
 //! Protocol-level instance types for the lifted STARK prover and verifier.
 //!
-//! - [`AirInstance`]: Verifier instance — public values + variable-length inputs
+//! - [`AirInstance`]: Verifier instance — public values + external public inputs
 //! - [`AirWitness`]: Prover witness — trace + public values
 //! - [`InstanceShapes`]: Per-instance trace heights carried on [`StarkProof`](crate::StarkProof)
 
@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{AirStructureError, LiftedAir, VarLenPublicInputs, log2_strict_u8};
+use miden_lifted_air::{AirStructureError, LiftedAir, log2_strict_u8};
 use p3_challenger::CanObserve;
 use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -19,10 +19,10 @@ use thiserror::Error;
 // Instance data
 // ============================================================================
 
-/// Verifier instance: public values and variable-length inputs.
+/// Verifier instance: public values and external public inputs.
 ///
-/// Both the prover and verifier carry `var_len_public_inputs`. The verifier uses
-/// them in [`LiftedAir::reduced_aux_values`] for the cross-AIR identity check.
+/// Both the prover and verifier carry `external_public_inputs`. The verifier uses
+/// them in [`LiftedAir::eval_external`] to produce the AIR's external assertions.
 ///
 /// Log trace heights are not part of the instance — they are carried on the
 /// [`StarkProof`](crate::StarkProof) as [`InstanceShapes`] and absorbed into
@@ -31,24 +31,27 @@ use thiserror::Error;
 pub struct AirInstance<'a, F> {
     /// Public values for this AIR.
     pub public_values: &'a [F],
-    /// Reducible inputs for the cross-AIR identity check. Empty slice if no buses.
-    pub var_len_public_inputs: VarLenPublicInputs<'a, F>,
+    /// Flat slice of external public inputs, consumed only by
+    /// [`LiftedAir::eval_external`]. The AIR owns the schema; an empty slice
+    /// is fine if the AIR has no external inputs.
+    pub external_public_inputs: &'a [F],
 }
 
-/// Prover witness: trace matrix, public values, and variable-length public inputs.
+/// Prover witness: trace matrix, public values, and external public inputs.
 ///
 /// Validates on construction that the trace height is a power of two.
 ///
 /// **Commitment:** callers **must** bind both `public_values` and
-/// `var_len_public_inputs` to the Fiat-Shamir challenger state before proving.
+/// `external_public_inputs` to the Fiat-Shamir challenger state before proving.
 #[derive(Clone, Copy, Debug)]
 pub struct AirWitness<'a, F> {
     /// Main trace matrix.
     pub trace: &'a RowMajorMatrix<F>,
     /// Public values for this AIR.
     pub public_values: &'a [F],
-    /// Variable-length public inputs (reducible inputs for bus identity checks).
-    pub var_len_public_inputs: VarLenPublicInputs<'a, F>,
+    /// Flat slice of external public inputs, consumed only by
+    /// [`LiftedAir::eval_external`].
+    pub external_public_inputs: &'a [F],
 }
 
 impl<'a, F> AirWitness<'a, F> {
@@ -60,7 +63,7 @@ impl<'a, F> AirWitness<'a, F> {
     pub fn new(
         trace: &'a RowMajorMatrix<F>,
         public_values: &'a [F],
-        var_len_public_inputs: VarLenPublicInputs<'a, F>,
+        external_public_inputs: &'a [F],
     ) -> Self
     where
         F: Field,
@@ -73,7 +76,7 @@ impl<'a, F> AirWitness<'a, F> {
         Self {
             trace,
             public_values,
-            var_len_public_inputs,
+            external_public_inputs,
         }
     }
 
@@ -81,7 +84,7 @@ impl<'a, F> AirWitness<'a, F> {
     pub fn to_instance(&self) -> AirInstance<'a, F> {
         AirInstance {
             public_values: self.public_values,
-            var_len_public_inputs: self.var_len_public_inputs,
+            external_public_inputs: self.external_public_inputs,
         }
     }
 }
@@ -216,8 +219,6 @@ pub enum InstanceValidationError {
     WidthMismatch { expected: usize, actual: usize },
     #[error("public values length mismatch: expected {expected}, got {actual}")]
     PublicValuesMismatch { expected: usize, actual: usize },
-    #[error("var-len public inputs count mismatch: expected {expected}, got {actual}")]
-    VarLenPublicInputsMismatch { expected: usize, actual: usize },
     #[error("trace height {trace_height} is less than max periodic column length {max_period}")]
     TraceHeightBelowPeriod { trace_height: usize, max_period: usize },
     #[error(
@@ -252,7 +253,8 @@ pub enum InstanceValidationError {
 ///   downstream `two_adic_generator` and `1usize << log_lde_height` against wire-format shapes; the
 ///   `usize` bound only bites on 32-bit targets)
 /// - each AIR is structurally valid ([`LiftedAir::validate`])
-/// - each instance's public values / var-len inputs match its AIR
+/// - each instance's public values length matches its AIR (external public inputs are
+///   shape-validated by the AIR itself inside `eval_external`)
 /// - max height ≥ 2 (needed for the 2-row transition window)
 /// - each trace height covers the AIR's longest periodic column
 pub(crate) fn validate_inputs<F, EF, A>(
@@ -288,13 +290,6 @@ where
             return Err(InstanceValidationError::PublicValuesMismatch {
                 expected: expected_pv,
                 actual: inst.public_values.len(),
-            });
-        }
-        let expected_vl = air.num_var_len_public_inputs();
-        if inst.var_len_public_inputs.len() != expected_vl {
-            return Err(InstanceValidationError::VarLenPublicInputsMismatch {
-                expected: expected_vl,
-                actual: inst.var_len_public_inputs.len(),
             });
         }
         if log_h < log_prev {

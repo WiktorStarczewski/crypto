@@ -1,8 +1,9 @@
-//! Auxiliary trace types: builder and cross-AIR identity checking.
+//! Auxiliary trace types: builder and external assertion evaluation.
 //!
 //! # Protocol Overview
 //!
-//! The auxiliary trace enables cross-AIR buses (multiset / logup) in the lifted STARK.
+//! The auxiliary trace enables cross-AIR interactions (e.g. multiset / logup
+//! arguments) in the lifted STARK.
 //!
 //! ## Prover
 //!
@@ -23,32 +24,18 @@
 //!
 //! 6. The verifier receives aux values from the transcript.
 //! 7. Constraint evaluation (steps 4–5) is checked at a random point.
-//! 8. [`reduced_aux_values`](crate::LiftedAir::reduced_aux_values) computes each AIR's bus
-//!    contribution from the aux values, challenges, and public inputs.
-//! 9. Global check: all contributions combine to identity (prod=1, sum=0).
+//! 8. [`eval_external`](crate::LiftedAir::eval_external) produces each AIR's external assertions
+//!    from the aux values, challenges, and public inputs.
+//! 9. Per-AIR check: each entry of every AIR's assertion list must equal zero. The verifier checks
+//!    them one by one and reports the first non-zero entry along with the offending instance and
+//!    assertion index.
 
 mod builder;
-mod values;
 
 pub use builder::AuxBuilder;
-pub use values::ReducedAuxValues;
-
-/// Variable-length public inputs for an AIR instance.
-///
-/// A list of *reducible inputs*: each `&[F]` is a slice of base-field elements
-/// that [`LiftedAir::reduced_aux_values`](crate::LiftedAir::reduced_aux_values)
-/// reduces to a single extension-field value. The AIR defines how to group and
-/// interpret them (e.g. which inputs belong to which bus).
-///
-/// The number of slices must equal
-/// [`LiftedAir::num_var_len_public_inputs`](crate::LiftedAir::num_var_len_public_inputs).
-///
-/// **Commitment:** callers **must** bind these inputs to the Fiat-Shamir
-/// challenger state, just like the AIR's public values.
-pub type VarLenPublicInputs<'a, F> = &'a [&'a [F]];
 
 /// Boxed error returned by
-/// [`LiftedAir::reduced_aux_values`](crate::LiftedAir::reduced_aux_values).
+/// [`LiftedAir::eval_external`](crate::LiftedAir::eval_external).
 ///
 /// Each AIR defines its own concrete error type and boxes it into this alias.
 pub type ReductionError = alloc::boxed::Box<dyn core::error::Error + Send + Sync>;

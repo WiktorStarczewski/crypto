@@ -17,8 +17,9 @@
 //! 1. **Protocol parameters** — e.g. the STARK configuration, blowup factor, and any
 //!    application-level domain separator.
 //!
-//! 2. **Public values and variable-length inputs** — `public_values` and `var_len_public_inputs`
-//!    for every instance. Without this, Fiat-Shamir challenges are independent of the statement.
+//! 2. **Public values and external public inputs** — `public_values` and
+//!    `external_public_inputs` for every instance. Without this, Fiat-Shamir challenges are
+//!    independent of the statement.
 //!
 //! 3. **AIR configurations and `air_order`** — The proof defines an ordering of AIR instances
 //!    (`air_order()[j]` is the caller's original index at proof position `j`), queryable via
@@ -39,9 +40,7 @@
 //! ch.observe(F::from_u8(config.pcs().log_blowup()));        // protocol parameters
 //! // ... observe remaining protocol parameters ...
 //! ch.observe_slice(&public_values);
-//! for vl in &var_len_public_inputs {
-//!     ch.observe_slice(vl);
-//! }
+//! ch.observe_slice(external_public_inputs);
 //! // For multi-AIR: bind AIR configurations and air_order (see below).
 //!
 //! // --- Prove ---
@@ -53,9 +52,7 @@
 //! ch.observe(F::from_u8(config.pcs().log_blowup()));
 //! // ... observe remaining protocol parameters ...
 //! ch.observe_slice(&public_values);
-//! for vl in &var_len_public_inputs {
-//!     ch.observe_slice(vl);
-//! }
+//! ch.observe_slice(external_public_inputs);
 //! let verifier_digest = verify_multi(&config, &verifier_instances, &output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
@@ -95,7 +92,7 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8};
+use miden_lifted_air::{AuxBuilder, LiftedAir, log2_strict_u8};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -127,7 +124,7 @@ pub enum ProverError {
 ///
 /// The caller's challenger must already be bound to the full statement
 /// (protocol parameters, AIR configuration, public values, and
-/// variable-length inputs) — see the module-level docs.
+/// external public inputs) — see the module-level docs.
 ///
 /// This is a convenience wrapper around [`prove_multi`] for the single-AIR case.
 ///
@@ -138,7 +135,7 @@ pub fn prove_single<F, EF, A, B, SC>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     public_values: &[F],
-    var_len_public_inputs: VarLenPublicInputs<'_, F>,
+    external_public_inputs: &[F],
     aux_builder: &B,
     challenger: SC::Challenger,
 ) -> Result<StarkOutput<F, EF, SC>, ProverError>
@@ -149,7 +146,7 @@ where
     A: LiftedAir<F, EF>,
     B: AuxBuilder<F, EF>,
 {
-    let witness = AirWitness::new(trace, public_values, var_len_public_inputs);
+    let witness = AirWitness::new(trace, public_values, external_public_inputs);
     prove_multi(config, &[(air, witness, aux_builder)], challenger)
 }
 
@@ -157,7 +154,8 @@ where
 ///
 /// The caller's challenger must already be bound to the full statement
 /// (protocol parameters, AIR configurations, AIR ordering, and public
-/// inputs — both fixed and variable-length) — see the module-level docs.
+/// inputs — both the flat `public_values` and the external public-input
+/// matrices) — see the module-level docs.
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)

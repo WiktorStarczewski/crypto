@@ -26,8 +26,8 @@ pub trait AuxBuilder<F: Field, EF: ExtensionField<F>> {
     /// - `aux_values`: Extension-field scalars committed to the Fiat-Shamir transcript. Their
     ///   meaning is AIR-defined — typically the aux trace's last row, but the protocol does not
     ///   require this. The AIR's [`eval`](crate::LiftedAir::eval) should constrain how they relate
-    ///   to the committed trace, and [`reduced_aux_values`](crate::LiftedAir::reduced_aux_values)
-    ///   uses them for cross-AIR bus identity checking.
+    ///   to the committed trace, and [`eval_external`](crate::LiftedAir::eval_external) consumes
+    ///   them to produce external assertions over the AIR's public inputs.
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<F>,

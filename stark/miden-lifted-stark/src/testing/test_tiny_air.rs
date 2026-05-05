@@ -73,10 +73,6 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
         1
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let start = builder.public_values()[0];
@@ -282,7 +278,7 @@ fn prover_rejects_non_power_of_two_trace_height() {
     let bad_witness = AirWitness {
         trace: &trace,
         public_values: &public_values,
-        var_len_public_inputs: &[],
+        external_public_inputs: &[],
     };
 
     let result = prove_multi(&config, &[(&air, bad_witness, &TinyAuxBuilder)], test_challenger());

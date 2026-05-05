@@ -15,7 +15,7 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 | `AirWitness` | Bundle a trace with its public values |
 
 ```text
-prove_single(config, air, trace, public_values, var_len_public_inputs, aux_builder, challenger)
+prove_single(config, air, trace, public_values, external_public_inputs, aux_builder, challenger)
 prove_multi(config, &[(air, witness, aux_builder), ...], challenger)
 ```
 
@@ -24,9 +24,9 @@ prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / transcript binding
 
-The caller must bind protocol parameters, public values, variable-length
-public inputs, AIR configurations, and `air_order` into the challenger
-before calling `prove_multi`. See the Rust module-level docs for the full contract
+The caller must bind protocol parameters, public values, external public
+inputs, AIR configurations, and `air_order` into the challenger before
+calling `prove_multi`. See the Rust module-level docs for the full contract
 and code examples.
 
 ## Protocol flow

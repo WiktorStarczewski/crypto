@@ -117,13 +117,6 @@ pub fn check_constraints_multi<F, EF, A, B>(
             air.num_public_values(),
             witness.public_values.len()
         );
-        assert_eq!(
-            witness.var_len_public_inputs.len(),
-            air.num_var_len_public_inputs(),
-            "instance {i}: var-len public inputs count mismatch: expected {}, got {}",
-            air.num_var_len_public_inputs(),
-            witness.var_len_public_inputs.len()
-        );
         assert!(
             challenges.len() >= air.num_randomness(),
             "instance {i}: not enough challenges: need {}, got {}",

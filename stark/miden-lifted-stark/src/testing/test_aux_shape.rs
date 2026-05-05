@@ -33,10 +33,6 @@ impl LiftedAir<Felt, QuadFelt> for BadAuxWidthAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
 }
 
