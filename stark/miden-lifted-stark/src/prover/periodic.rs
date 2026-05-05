@@ -124,7 +124,8 @@ mod tests {
         let lde_height = trace_height << log_blowup as usize;
 
         // Create a domain at max height (no lifting)
-        let domain: LiftedDomain<gl::Felt> = LiftedDomain::canonical(log_trace_height, log_blowup);
+        let domain: LiftedDomain<gl::Felt> =
+            LiftedDomain::canonical(log_trace_height, log_blowup).unwrap();
 
         // Build the repeated matrix (same logic as periodic_columns_matrix)
         let max_period = columns.iter().map(Vec::len).max().unwrap();

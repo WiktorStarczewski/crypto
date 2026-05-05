@@ -95,7 +95,7 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8};
+use miden_lifted_air::{AuxBuilder, LiftedAir, VarLenPublicInputs};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -106,7 +106,7 @@ use tracing::{info_span, instrument};
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain},
-    instance::{AirWitness, InstanceShapes, InstanceValidationError, validate_inputs},
+    instance::{AirWitness, InstanceShapes, InstanceValidationError},
     pcs::prover::open_with_channel,
     proof::{StarkOutput, StarkProof},
 };
@@ -116,6 +116,8 @@ use crate::{
 pub enum ProverError {
     #[error("instance validation failed: {0}")]
     Instance(#[from] InstanceValidationError),
+    #[error("domain construction failed: {0}")]
+    Domain(#[from] crate::domain::DomainError),
     #[error(
         "constraint degree exceeds blowup: \
          log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
@@ -190,8 +192,8 @@ where
 
     let log_blowup = config.pcs().log_blowup();
 
-    // Validate AIR structure, instance dimensions, heights, and trace widths.
-    let log_max_trace_height = validate_inputs(&verifier_instances, &instance_shapes, log_blowup)?;
+    // Validate AIR structure, instance dimensions, and trace widths.
+    let log_max_trace_height = instance_shapes.validate(&verifier_instances)?;
     for &(air, w, _) in &instances {
         if w.trace.width() != air.width() {
             return Err(InstanceValidationError::WidthMismatch {
@@ -201,6 +203,11 @@ where
             .into());
         }
     }
+
+    // Construct the canonical max LDE domain (LDE-bound check) and per-instance sub-domains.
+    let max_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup)?;
+    let instance_domains =
+        max_lde_domain.sub_domains(instance_shapes.log_trace_heights().iter().copied())?;
 
     // Observe shape metadata before creating the transcript.
     instance_shapes.observe_heights::<F, _>(&mut challenger);
@@ -223,11 +230,12 @@ where
         });
     }
 
-    // Max LDE coset (for the largest trace, no lifting).
-    let max_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup);
     // Quotient evaluation coset: a sub-coset of the LDE coset where Q is evaluated
     // before being decomposed into D chunks and committed on the LDE coset itself.
-    let max_quotient_height = max_lde_domain.evaluation_coset(log_constraint_degree).size();
+    let max_quotient_height = max_lde_domain
+        .evaluation_coset(log_constraint_degree)
+        .expect("log_constraint_degree ≤ log_blowup, checked above")
+        .size();
 
     // 1. Commit all main traces (trace order — ascending height).
     //
@@ -242,8 +250,8 @@ where
             RowMajorMatrix::new(values, w.trace.width())
         })
         .collect();
-    let main_committed =
-        info_span!("commit to main traces").in_scope(|| commit_traces(config, main_traces));
+    let main_committed = info_span!("commit to main traces")
+        .in_scope(|| commit_traces(config, &instance_domains, main_traces));
     channel.send_commitment(main_committed.root());
 
     // 2. Sample randomness and build aux traces for all AIRs
@@ -289,8 +297,8 @@ where
         })
         .collect();
 
-    let aux_committed =
-        info_span!("commit to aux traces").in_scope(|| commit_traces(config, aux_traces));
+    let aux_committed = info_span!("commit to aux traces")
+        .in_scope(|| commit_traces(config, &instance_domains, aux_traces));
     channel.send_commitment(aux_committed.root());
 
     // Observe aux values into the transcript (binds to Fiat-Shamir state).
@@ -324,12 +332,8 @@ where
 
     info_span!("evaluate constraints").in_scope(|| {
         for (i, (air, w, _)) in instances.iter().enumerate() {
-            let trace_height = w.trace.height();
-            let log_trace_height = log2_strict_u8(trace_height);
-
-            // Create LiftedDomain for this trace (may be lifted relative to max).
-            let this_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup)
-                .sub_domain(log_trace_height);
+            // Pre-built and validated by `validated_domains`.
+            let this_lde_domain = instance_domains[i];
             let this_quotient_height = this_lde_domain.trace_height() * constraint_degree;
 
             // Truncate the committed LDE to the quotient evaluation domain gJ (size N·D).

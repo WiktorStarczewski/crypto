@@ -28,7 +28,7 @@ fn deep_quotient_end_to_end() {
     let log_lde_height: u8 = 10;
     let lde_height = 1 << log_lde_height as usize;
     let max_domain: LiftedDomain<Felt> =
-        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup);
+        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup).unwrap();
 
     let params = DeepParams { deep_pow_bits: 1 };
     // Two random opening points

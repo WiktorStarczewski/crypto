@@ -184,7 +184,11 @@ where
 {
     let log_d = log2_strict_usize(chunks.len());
     // Generator of the size-D subgroup, where D = constraint degree.
-    let eval_coset = domain.evaluation_coset(log_d as u8);
+    // `evaluation_coset` cannot fail: log_d == log_constraint_degree, already checked
+    // against log_blowup before this function is reached.
+    let eval_coset = domain
+        .evaluation_coset(log_d as u8)
+        .expect("log_constraint_degree ≤ log_blowup, checked upstream");
     let omega_s = eval_coset.subgroup().shrink(domain.log_trace_height()).generator();
 
     // u = (z/s)ᴺ where s = lde_shift (same as the evaluation coset's shift).

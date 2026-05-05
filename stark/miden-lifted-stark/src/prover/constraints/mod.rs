@@ -94,7 +94,10 @@ pub fn evaluate_constraints_into<F, EF, A>(
     assert_eq!(gj_height % width, 0, "quotient height must be divisible by packing width");
 
     // Precompute selectors over the quotient evaluation coset.
-    let sels = domain.selectors(log_constraint_degree);
+    // Cannot fail: log_constraint_degree ≤ log_blowup, checked in prove_multi.
+    let sels = domain
+        .selectors(log_constraint_degree)
+        .expect("log_constraint_degree ≤ log_blowup, checked upstream");
 
     // ─── Decompose alpha powers by constraint layout ───
     let aux_ef_width = air.aux_width();

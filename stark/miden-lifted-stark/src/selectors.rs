@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn test_selectors_at_point() {
         let log_n = 4;
-        let domain: LiftedDomain<Felt> = LiftedDomain::canonical(log_n, 0);
+        let domain: LiftedDomain<Felt> = LiftedDomain::canonical(log_n, 0).unwrap();
 
         // Sample a point outside the domain
         let z = QuadFelt::from(Felt::from_u32(12345));
@@ -78,9 +78,9 @@ mod tests {
     fn test_selectors_on_coset() {
         let log_trace = 3;
         let log_blowup = 2; // 4x blowup
-        let domain: LiftedDomain<Felt> = LiftedDomain::canonical(log_trace, log_blowup);
+        let domain: LiftedDomain<Felt> = LiftedDomain::canonical(log_trace, log_blowup).unwrap();
 
-        let sels: Selectors<Vec<Felt>> = domain.selectors(log_blowup);
+        let sels: Selectors<Vec<Felt>> = domain.selectors(log_blowup).unwrap();
 
         // Check lengths
         let coset_size = 1 << (log_trace + log_blowup);

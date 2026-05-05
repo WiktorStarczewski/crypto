@@ -25,7 +25,7 @@ fn bench_pcs(c: &mut Criterion) {
     let lmcs = test_lmcs();
 
     for &log_lde_height in LOG_HEIGHTS {
-        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0).unwrap();
         let shift = domain.lde_shift();
         let max_lde_size = 1usize << log_lde_height;
         let group_name = format!("PCS_Open/{max_lde_size}/goldilocks/poseidon2/{PARALLEL_STR}");

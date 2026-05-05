@@ -80,7 +80,9 @@ pub fn divide_by_vanishing_in_place<F, EF>(
     // Z_H(s·ω_Jⁱ) = sᴺ·ω_Dⁱ − 1 where
     // - s is the LDE shift (the evaluation coset shares it)
     // - ω_D is the size-D primitive root.
-    let eval_coset = domain.evaluation_coset(log_d);
+    let eval_coset = domain
+        .evaluation_coset(log_d)
+        .expect("log_d ≤ log_blowup, checked by the prover before commit_quotient");
     let shift = eval_coset.shift();
     let s_pow_n = shift.exp_power_of_2(domain.log_trace_height() as usize);
     let omega_d = eval_coset.subgroup().shrink(domain.log_trace_height()).generator();
@@ -169,7 +171,11 @@ where
     // Multiply c_hat[t, k] by (ω_Jᵗ)⁻ᵏ → a[t, k]·gᵏ.
     // This removes the per-coset shift ω_Jᵗ while keeping gᵏ baked in.
     info_span!("quotient scaling", n).in_scope(|| {
-        let omega_j_inv = domain.evaluation_coset(log_d as u8).subgroup().generator_inverse();
+        let omega_j_inv = domain
+            .evaluation_coset(log_d as u8)
+            .expect("log_d ≤ log_blowup, checked by the prover before commit_quotient")
+            .subgroup()
+            .generator_inverse();
 
         // Precompute ω_J⁻ᵏ for k = 0..N with sequential multiplications
         let row_bases: Vec<F> = omega_j_inv.powers().take(n).collect();

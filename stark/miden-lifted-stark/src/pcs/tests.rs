@@ -50,7 +50,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     let log_lde_height = log2_strict_u8(lde_height);
     let log_blowup = params.fri.log_blowup;
     let max_domain: LiftedDomain<Felt> =
-        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup);
+        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup).unwrap();
     let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
 
     let commitments: Vec<_> = trees.iter().map(|t| (t.root(), t.widths())).collect();
@@ -132,7 +132,7 @@ fn test_pcs_cases() {
 
     let log_blowup = params.fri.log_blowup;
     // Pass the LDE shift through `LiftedDomain` (the only sanctioned access path).
-    let lde_shift = LiftedDomain::<Felt>::canonical(6, log_blowup).lde_shift();
+    let lde_shift = LiftedDomain::<Felt>::canonical(6, log_blowup).unwrap().lde_shift();
 
     // Case 1: single matrix, single tree.
     let rng = &mut SmallRng::seed_from_u64(42);

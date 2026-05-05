@@ -53,7 +53,7 @@ fn bench_deep_quotient(c: &mut Criterion) {
             matrix_groups.iter().map(|matrices| lmcs.build_tree(matrices.clone())).collect();
 
         // Precompute coset points (LDE domain matches max matrix height)
-        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0).unwrap();
         let coset_points = domain.lde_coset().bit_reversed_points();
 
         // Get matrix references from trees (stored as BitReversedMatrixView after build_tree)

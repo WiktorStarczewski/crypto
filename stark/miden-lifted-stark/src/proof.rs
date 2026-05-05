@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain},
-    instance::{AirInstance, InstanceShapes, validate_air_order, validate_inputs},
+    instance::{AirInstance, InstanceShapes, validate_air_order},
     lmcs::{Lmcs, utils::aligned_len},
     pcs::proof::PcsTranscript,
     verifier::VerifierError,
@@ -208,7 +208,8 @@ where
         let instances = proof.instance_shapes.reorder(instances.to_vec())?;
 
         let log_blowup = config.pcs().log_blowup();
-        let log_max_trace_height = validate_inputs(&instances, &proof.instance_shapes, log_blowup)?;
+        let log_max_trace_height = proof.instance_shapes.validate(&instances)?;
+        let max_lde_domain = LiftedDomain::<L::F>::canonical(log_max_trace_height, log_blowup)?;
         proof.instance_shapes.observe_heights::<L::F, _>(&mut challenger);
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
@@ -222,9 +223,6 @@ where
         // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
         let constraint_degree =
             instances.iter().map(|(air, _)| air.constraint_degree()).max().unwrap_or(2);
-
-        // Max LDE coset (for the largest trace, no lifting)
-        let max_lde_domain = LiftedDomain::<L::F>::canonical(log_max_trace_height, log_blowup);
 
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();

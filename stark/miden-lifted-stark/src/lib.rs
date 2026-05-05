@@ -63,7 +63,7 @@ pub mod verifier;
 
 pub use config::{GenericStarkConfig, StarkConfig};
 pub use debug::{check_constraints, check_constraints_multi};
-pub use domain::{Coset, LiftedDomain, TwoAdicCoset, TwoAdicSubgroup};
+pub use domain::{Coset, DomainError, LiftedDomain, TwoAdicCoset, TwoAdicSubgroup};
 pub use instance::{AirInstance, AirWitness, InstanceShapes, InstanceValidationError};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,

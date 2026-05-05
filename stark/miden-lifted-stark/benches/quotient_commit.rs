@@ -39,7 +39,7 @@ fn bench_quotient_commit(c: &mut Criterion) {
         let label = format!("N=2^{log_n}");
 
         let domain: LiftedDomain<gl::Felt> =
-            LiftedDomain::canonical(log_n, QC_PCS_PARAMS.log_blowup());
+            LiftedDomain::canonical(log_n, QC_PCS_PARAMS.log_blowup()).unwrap();
 
         group.bench_function(BenchmarkId::new("lifted", &label), |bench| {
             bench.iter(|| {

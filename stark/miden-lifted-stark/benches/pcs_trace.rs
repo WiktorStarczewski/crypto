@@ -54,7 +54,7 @@ fn main() {
         eprintln!("{}\n", "=".repeat(60));
 
         // LDE coset for this batch — sole source of `F::GENERATOR`.
-        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0).unwrap();
         let shift = domain.lde_shift();
 
         let matrix_groups: Vec<Vec<RowMajorMatrix<Felt>>> =

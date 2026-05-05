@@ -112,7 +112,9 @@ where
         let log_lde_height = log2_strict_u8(matrix.height());
         let log_blowup = self.max_domain.log_blowup();
         let log_trace_height = log_lde_height - log_blowup;
-        self.max_domain.sub_domain(log_trace_height)
+        self.max_domain
+            .sub_domain(log_trace_height)
+            .expect("derived from validated max_domain; height ≤ max")
     }
 }
 
@@ -161,12 +163,14 @@ where
 ///
 /// # Arguments
 /// - `config`: STARK configuration containing PCS params, LMCS, and DFT
-/// - `traces`: Trace matrices sorted by height (ascending)
+/// - `domains`: One pre-validated [`LiftedDomain`] per trace, in the same order as `traces`. The
+///   last entry is the batch's max-trace domain (heights are sorted ascending).
+/// - `traces`: Trace matrices, in the same order as `domains`. Each must have height matching its
+///   paired `domains[i].trace_height()`.
 ///
 /// # Panics
-/// - If `traces` is empty
-/// - If trace heights are not powers of two
-/// - If traces are not sorted by height in ascending order
+/// - If `domains` and `traces` have different lengths
+/// - If any trace's height doesn't match its paired domain's `trace_height()`
 ///
 /// Lifting note: for a trace of height `n` embedded into a max height `n_max`, let
 /// `r = n_max / n`. The commitment should behave as if it contains evaluations of the
@@ -175,6 +179,7 @@ where
 /// `(g·ω)ʳ = gʳ·ωʳ` sends the max domain down to the smaller one.
 pub fn commit_traces<F, EF, SC>(
     config: &SC,
+    domains: &[LiftedDomain<F>],
     traces: Vec<RowMajorMatrix<F>>,
 ) -> Committed<F, RowMajorMatrix<F>, SC::Lmcs>
 where
@@ -182,37 +187,26 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
+    assert_eq!(domains.len(), traces.len(), "domains and traces must have matching lengths");
     assert!(!traces.is_empty(), "at least one trace required");
 
-    assert!(
-        traces.windows(2).all(|w| w[0].height() <= w[1].height()),
-        "traces must be sorted by height in ascending order"
-    );
-
     let log_blowup = config.pcs().log_blowup();
-
-    // Canonical max-trace domain for the batch.
-    let max_trace_height = traces.last().unwrap().height();
-    let log_max_trace_height = log2_strict_u8(max_trace_height);
-    let max_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup);
+    let max_domain = *domains.last().expect("non-empty");
 
     let ldes: Vec<_> = traces
         .into_iter()
+        .zip(domains)
         .enumerate()
-        .map(|(idx, trace)| {
-            let trace_height = trace.height();
+        .map(|(idx, (trace, domain))| {
             let width = trace.width();
-
-            // Validate height is power of two
-            assert!(
-                trace_height.is_power_of_two(),
-                "trace height must be power of two (index {idx})"
+            assert_eq!(
+                trace.height(),
+                domain.trace_height(),
+                "trace {idx} height does not match its domain",
             );
 
-            let log_trace_height = log2_strict_u8(trace_height);
-
-            // Per-matrix sub-domain provides the (canonical) coset shift.
-            let coset_shift = max_domain.sub_domain(log_trace_height).lde_shift();
+            let log_trace_height = domain.log_trace_height();
+            let coset_shift = domain.lde_shift();
 
             info_span!("LDE", trace = idx, log_height = log_trace_height, width).in_scope(|| {
                 let lde = config.dft().coset_lde_batch(trace, log_blowup.into(), coset_shift);

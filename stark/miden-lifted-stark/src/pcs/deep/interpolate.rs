@@ -229,7 +229,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8; // Full LDE domain size = 256
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0).unwrap();
         let shift = domain.lde_shift();
 
         // Coset points in bit-reversed order for our barycentric evaluation
@@ -306,7 +306,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0).unwrap();
         let shift = domain.lde_shift();
 
         // Coset points in both orderings
@@ -373,7 +373,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0).unwrap();
         let shift = domain.lde_shift();
 
         // Coset points in bit-reversed order
@@ -457,7 +457,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0).unwrap();
         let shift = domain.lde_shift();
 
         let coset_points_br = domain.lde_coset().bit_reversed_points();

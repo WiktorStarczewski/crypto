@@ -57,7 +57,7 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain},
-    instance::{AirInstance, InstanceValidationError, validate_air_order, validate_inputs},
+    instance::{AirInstance, InstanceValidationError, validate_air_order},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
 };
@@ -67,6 +67,8 @@ use crate::{
 pub enum VerifierError {
     #[error("instance validation failed: {0}")]
     Instance(#[from] InstanceValidationError),
+    #[error("domain construction failed: {0}")]
+    Domain(#[from] crate::domain::DomainError),
     #[error("PCS verification failed: {0}")]
     Pcs(#[from] PcsError),
     #[error("transcript error: {0}")]
@@ -155,8 +157,13 @@ where
 
     let log_blowup = config.pcs().log_blowup();
 
-    let log_max_trace_height = validate_inputs(&instances, instance_shapes, log_blowup)?;
-    let log_trace_heights = instance_shapes.log_trace_heights();
+    // Validate AIR/instance contracts; returns the max log trace height.
+    let log_max_trace_height = instance_shapes.validate(&instances)?;
+    // Construct the canonical max LDE domain (LDE-bound check happens here)
+    // and the per-instance sub-domains (cannot fail under sorted-ascending invariant).
+    let max_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup)?;
+    let instance_domains =
+        max_lde_domain.sub_domains(instance_shapes.log_trace_heights().iter().copied())?;
 
     instance_shapes.observe_heights::<F, _>(&mut challenger);
 
@@ -181,10 +188,7 @@ where
 
     let constraint_degree = 1 << log_constraint_degree as usize;
 
-    let max_trace_height = 1 << log_max_trace_height as usize;
-
-    // Max LDE coset (for the largest trace, no lifting)
-    let max_lde_domain = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup);
+    let max_trace_height = max_lde_domain.trace_height();
 
     // 1. Receive main trace commitment
     let main_commit = channel.receive_commitment()?.clone();
@@ -264,8 +268,7 @@ where
     let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
     for (j, (air, inst)) in instances.iter().enumerate() {
-        let domain_j = LiftedDomain::<F>::canonical(log_max_trace_height, log_blowup)
-            .sub_domain(log_trace_heights[j]);
+        let domain_j = instance_domains[j];
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());

@@ -30,8 +30,40 @@ use miden_stark_transcript::Channel;
 use p3_field::{ExtensionField, TwoAdicField, batch_multiplicative_inverse};
 use p3_maybe_rayon::prelude::*;
 use p3_util::reverse_slice_index_bits;
+use thiserror::Error;
 
 use crate::selectors::Selectors;
+
+// ============================================================================
+// Errors
+// ============================================================================
+
+/// Errors from constructing a [`LiftedDomain`] or one of its derived cosets.
+///
+/// Every fallible construction (`canonical`, `sub_domain`, `evaluation_coset`,
+/// `selectors`) returns one of these instead of panicking. Construction
+/// success is therefore the validation evidence — once you hold a
+/// `LiftedDomain<F>`, its parameters are bounds-checked.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum DomainError {
+    /// `log_lde_order = log_trace_height + log_blowup` exceeds the smaller of
+    /// `F::TWO_ADICITY` (no `2^log`-th root of unity exists) and
+    /// `usize::BITS - 1` (32-bit overflow guard).
+    #[error(
+        "LDE log order {log_lde_order} exceeds bound {bound} (min of F::TWO_ADICITY and usize::BITS-1)"
+    )]
+    LdeOrderTooLarge { log_lde_order: usize, bound: usize },
+    /// Sub-domain construction with a trace height larger than the parent's.
+    #[error("sub-domain trace log size {smaller} exceeds parent {parent}")]
+    SubDomainTooLarge { smaller: u8, parent: u8 },
+    /// Constraint degree exceeds the LDE blowup, so the quotient evaluation
+    /// coset would be larger than the LDE coset that contains it.
+    #[error("constraint log degree {log_constraint_degree} exceeds blowup {log_blowup}")]
+    ConstraintDegreeExceedsBlowup {
+        log_constraint_degree: u8,
+        log_blowup: u8,
+    },
+}
 
 // ============================================================================
 // Canonical shift
@@ -311,8 +343,8 @@ impl<F: TwoAdicField> Coset<F> for TwoAdicCoset<F> {
 /// trace subgroup `H ⊆ K` and a lift ratio `r` relative to the max coset
 /// `g·K_max`.
 ///
-/// **Single home of `F::GENERATOR` in this crate** (via the
-/// [`canonical_shift`] helper used in [`LiftedDomain::canonical`] and
+/// **Single home of `F::GENERATOR` in this crate** (via the internal
+/// `canonical_shift` helper used in [`LiftedDomain::canonical`] and
 /// [`LiftedDomain::sub_domain`]).
 ///
 /// # Invariants
@@ -347,19 +379,27 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     /// the trace subgroup; the shift is recomputed from the new LDE order
     /// (still canonical for that order).
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `log_trace_height + log_blowup > F::TWO_ADICITY` (enforced
-    /// by [`TwoAdicSubgroup::new`]).
+    /// Returns [`DomainError::LdeOrderTooLarge`] if
+    /// `log_trace_height + log_blowup` exceeds the smaller of `F::TWO_ADICITY`
+    /// (no `2^log`-th root of unity exists) and `usize::BITS - 1` (32-bit
+    /// overflow guard).
     #[inline]
-    pub fn canonical(log_trace_height: u8, log_blowup: u8) -> Self {
-        let log_lde_height = log_trace_height + log_blowup;
+    pub fn canonical(log_trace_height: u8, log_blowup: u8) -> Result<Self, DomainError> {
+        let log_lde_order = log_trace_height as usize + log_blowup as usize;
+        let bound = F::TWO_ADICITY.min((usize::BITS - 1) as usize);
+        if log_lde_order > bound {
+            return Err(DomainError::LdeOrderTooLarge { log_lde_order, bound });
+        }
+        // Bound check passed → both sub-sizes fit in u8 and inside F's two-adicity.
+        let log_lde_height = log_lde_order as u8;
         let shift = canonical_shift::<F>(log_lde_height);
-        Self {
+        Ok(Self {
             trace_subgroup: TwoAdicSubgroup::new(log_trace_height),
             lde_coset: TwoAdicCoset::new(TwoAdicSubgroup::new(log_lde_height), shift),
             log_lift_ratio: 0,
-        }
+        })
     }
 
     /// Derive a sub-domain with a smaller trace subgroup, sharing this
@@ -368,26 +408,39 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     /// The new `log_lift_ratio` grows by the trace shrink amount, recording
     /// the batch context for OOD lifting.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `smaller_log_trace_height > self.log_trace_height()`.
+    /// Returns [`DomainError::SubDomainTooLarge`] if `smaller_log_trace_height
+    /// > self.log_trace_height()`.
     #[inline]
-    pub fn sub_domain(&self, smaller_log_trace_height: u8) -> Self {
+    pub fn sub_domain(&self, smaller_log_trace_height: u8) -> Result<Self, DomainError> {
         let log_trace = self.log_trace_height();
-        assert!(
-            smaller_log_trace_height <= log_trace,
-            "sub_domain trace height {smaller_log_trace_height} exceeds parent {log_trace}"
-        );
+        if smaller_log_trace_height > log_trace {
+            return Err(DomainError::SubDomainTooLarge {
+                smaller: smaller_log_trace_height,
+                parent: log_trace,
+            });
+        }
         let log_blowup = self.log_blowup();
         let log_lift_ratio_inc = log_trace - smaller_log_trace_height;
         let new_log_lift_ratio = self.log_lift_ratio + log_lift_ratio_inc;
         let new_log_lde = smaller_log_trace_height + log_blowup;
         let shift = canonical_shift::<F>(new_log_lde);
-        Self {
+        Ok(Self {
             trace_subgroup: TwoAdicSubgroup::new(smaller_log_trace_height),
             lde_coset: TwoAdicCoset::new(TwoAdicSubgroup::new(new_log_lde), shift),
             log_lift_ratio: new_log_lift_ratio,
-        }
+        })
+    }
+
+    /// Bulk version of [`sub_domain`](Self::sub_domain): one sub-domain per
+    /// input height, in iteration order. Stops at the first failure and
+    /// returns the corresponding [`DomainError`].
+    pub fn sub_domains<I: IntoIterator<Item = u8>>(
+        &self,
+        smaller_log_trace_heights: I,
+    ) -> Result<Vec<Self>, DomainError> {
+        smaller_log_trace_heights.into_iter().map(|h| self.sub_domain(h)).collect()
     }
 
     // ============ Subgroup / coset accessors ============
@@ -454,13 +507,22 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     /// (smaller) order. Q is evaluated on this coset, then decomposed into D
     /// chunks each LDE-extended onto the canonical LDE coset for commitment.
     ///
-    /// # Panics
-    /// Panics if `log_constraint_degree > log_blowup`.
-    pub fn evaluation_coset(&self, log_constraint_degree: u8) -> TwoAdicCoset<F> {
+    /// # Errors
+    /// Returns [`DomainError::ConstraintDegreeExceedsBlowup`] if
+    /// `log_constraint_degree > log_blowup`.
+    pub fn evaluation_coset(
+        &self,
+        log_constraint_degree: u8,
+    ) -> Result<TwoAdicCoset<F>, DomainError> {
         let log_blowup = self.log_blowup();
-        assert!(log_constraint_degree <= log_blowup, "constraint degree cannot exceed blowup");
+        if log_constraint_degree > log_blowup {
+            return Err(DomainError::ConstraintDegreeExceedsBlowup {
+                log_constraint_degree,
+                log_blowup,
+            });
+        }
         let log_eval_height = self.log_trace_height() + log_constraint_degree;
-        TwoAdicCoset::new(TwoAdicSubgroup::new(log_eval_height), self.lde_coset.shift())
+        Ok(TwoAdicCoset::new(TwoAdicSubgroup::new(log_eval_height), self.lde_coset.shift()))
     }
 
     // ============ Selector computation ============
@@ -479,11 +541,12 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     /// distinct values across the coset; we batch-invert the unique
     /// denominators.
     ///
-    /// # Panics
-    /// Panics if `log_constraint_degree > log_blowup` (via [`Self::evaluation_coset`]).
-    pub fn selectors(&self, log_constraint_degree: u8) -> Selectors<Vec<F>> {
+    /// # Errors
+    /// Returns [`DomainError::ConstraintDegreeExceedsBlowup`] if
+    /// `log_constraint_degree > log_blowup` (via [`Self::evaluation_coset`]).
+    pub fn selectors(&self, log_constraint_degree: u8) -> Result<Selectors<Vec<F>>, DomainError> {
         let log_trace_height = self.log_trace_height();
-        let eval_coset = self.evaluation_coset(log_constraint_degree);
+        let eval_coset = self.evaluation_coset(log_constraint_degree)?;
         let coset_size = eval_coset.size();
         let shift = eval_coset.shift();
 
@@ -513,11 +576,11 @@ impl<F: TwoAdicField> LiftedDomain<F> {
                 .collect()
         };
 
-        Selectors {
+        Ok(Selectors {
             is_first_row: single_point_selector(F::ONE),
             is_last_row: single_point_selector(omega_h_inv),
             is_transition: xs.into_par_iter().map(|x| x - omega_h_inv).collect(),
-        }
+        })
     }
 
     /// Unnormalized Lagrange row selectors at an OOD extension-field point `z`,
@@ -724,7 +787,7 @@ mod tests {
     #[test]
     fn domain_canonical_is_unlifted() {
         // Canonical of trace 2^10, blowup 2^3 — no lifting.
-        let info: LiftedDomain<Felt> = LiftedDomain::canonical(10, 3);
+        let info: LiftedDomain<Felt> = LiftedDomain::canonical(10, 3).unwrap();
         assert_eq!(info.log_trace_height(), 10);
         assert_eq!(info.log_lde_height(), 13);
         assert_eq!(info.log_blowup(), 3);
@@ -736,8 +799,8 @@ mod tests {
     #[test]
     fn sub_domain_lifts_relative_to_canonical() {
         // Canonical: max trace 2^12, blowup 2^3 — sub-domain at trace 2^10 → lift_ratio 2.
-        let parent: LiftedDomain<Felt> = LiftedDomain::canonical(12, 3);
-        let sub = parent.sub_domain(10);
+        let parent: LiftedDomain<Felt> = LiftedDomain::canonical(12, 3).unwrap();
+        let sub = parent.sub_domain(10).unwrap();
 
         assert_eq!(sub.log_trace_height(), 10);
         assert_eq!(sub.log_lde_height(), 13);
@@ -749,23 +812,47 @@ mod tests {
         // from the parent's lift ratio. Crucially, equal to canonical(10,3).lde_shift().
         let expected_shift = Felt::GENERATOR.exp_power_of_2(Felt::TWO_ADICITY - 13);
         assert_eq!(sub.lde_shift(), expected_shift);
-        assert_eq!(sub.lde_shift(), LiftedDomain::<Felt>::canonical(10, 3).lde_shift());
+        assert_eq!(sub.lde_shift(), LiftedDomain::<Felt>::canonical(10, 3).unwrap().lde_shift());
     }
 
     #[test]
     fn sub_domain_at_same_trace_is_identity() {
-        let tallest: LiftedDomain<Felt> = LiftedDomain::canonical(10, 3);
-        let same = tallest.sub_domain(10);
+        let tallest: LiftedDomain<Felt> = LiftedDomain::canonical(10, 3).unwrap();
+        let same = tallest.sub_domain(10).unwrap();
         assert_eq!(same.lde_shift(), tallest.lde_shift());
         assert_eq!(same.log_trace_height(), tallest.log_trace_height());
         assert_eq!(same.log_lde_height(), tallest.log_lde_height());
     }
 
     #[test]
+    fn canonical_too_large_returns_error() {
+        let err = LiftedDomain::<Felt>::canonical(Felt::TWO_ADICITY as u8, 1).unwrap_err();
+        assert!(matches!(err, DomainError::LdeOrderTooLarge { .. }));
+    }
+
+    #[test]
+    fn sub_domain_too_large_returns_error() {
+        let parent: LiftedDomain<Felt> = LiftedDomain::canonical(8, 2).unwrap();
+        let err = parent.sub_domain(9).unwrap_err();
+        assert_eq!(err, DomainError::SubDomainTooLarge { smaller: 9, parent: 8 });
+    }
+
+    #[test]
+    fn evaluation_coset_too_large_returns_error() {
+        let domain: LiftedDomain<Felt> = LiftedDomain::canonical(8, 2).unwrap();
+        let err = domain.evaluation_coset(3).unwrap_err();
+        assert_eq!(
+            err,
+            DomainError::ConstraintDegreeExceedsBlowup { log_constraint_degree: 3, log_blowup: 2 },
+        );
+    }
+
+    #[test]
     fn evaluation_coset_inherits_parent_shift() {
         // Sub-domain with lift_ratio = 2.
-        let lde: LiftedDomain<Felt> = LiftedDomain::canonical(12, 3).sub_domain(10);
-        let eval = lde.evaluation_coset(2);
+        let lde: LiftedDomain<Felt> =
+            LiftedDomain::canonical(12, 3).unwrap().sub_domain(10).unwrap();
+        let eval = lde.evaluation_coset(2).unwrap();
         // Order N · D = 2^(10 + 2) = 2^12.
         assert_eq!(eval.log_size(), 12);
         // Shift is borrowed from the parent LDE coset (literally a sub-coset).
@@ -776,7 +863,8 @@ mod tests {
 
     #[test]
     fn lde_coset_point_at_matches_shift_times_omega() {
-        let info: LiftedDomain<Felt> = LiftedDomain::canonical(5, 2).sub_domain(4);
+        let info: LiftedDomain<Felt> =
+            LiftedDomain::canonical(5, 2).unwrap().sub_domain(4).unwrap();
         let shift = info.lde_shift();
         let omega = info.lde_coset().generator();
         for i in 0..4 {
