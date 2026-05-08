@@ -397,35 +397,7 @@ where
     P: PackedValue<Value = Felt>,
 {
     fn permute_mut(&self, state: &mut [P; STATE_WIDTH]) {
-<<<<<<< HEAD
-        if P::WIDTH == 1 {
-            // SAFETY: P::WIDTH == 1 guarantees byte-equivalence with Felt
-            // per the PackedValue safety invariant.
-            let as_felts: &mut [Felt; STATE_WIDTH] =
-                unsafe { &mut *(state.as_mut_ptr().cast::<[Felt; STATE_WIDTH]>()) };
-            Self::apply_permutation(as_felts);
-            return;
-        }
-
-        let width = P::WIDTH;
-        assert!(width <= MAX_PACK_WIDTH, "PackedValue::WIDTH > {MAX_PACK_WIDTH} not supported");
-        let mut rows: [[Felt; STATE_WIDTH]; MAX_PACK_WIDTH] =
-            [[Felt::ZERO; STATE_WIDTH]; MAX_PACK_WIDTH];
-        for col in 0..STATE_WIDTH {
-            let lanes = state[col].as_slice();
-            for lane in 0..width {
-                rows[lane][col] = lanes[lane];
-            }
-        }
-        for lane in 0..width {
-            Self::apply_permutation(&mut rows[lane]);
-        }
-        for col in 0..STATE_WIDTH {
-            state[col] = P::from_fn(|lane| rows[lane][col]);
-        }
-=======
-        permute_packed(state, p3_permute);
->>>>>>> 180e8b6ac (refactor(crypto): hoist packed perm body to shared permute_packed helper)
+        permute_packed(state, Self::apply_permutation);
     }
 }
 
