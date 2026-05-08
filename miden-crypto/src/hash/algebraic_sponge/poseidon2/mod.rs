@@ -333,6 +333,8 @@ use p3_symmetric::{
     CryptographicPermutation, PaddingFreeSponge, Permutation, TruncatedPermutation,
 };
 
+use crate::hash::algebraic_sponge::permute_packed;
+
 // POSEIDON2 PERMUTATION FOR PLONKY3
 // ================================================================================================
 
@@ -386,18 +388,16 @@ impl Poseidon2Permutation256 {
 // PLONKY3 TRAIT IMPLEMENTATIONS
 // ================================================================================================
 
-/// Maximum supported `PackedValue::WIDTH` for the lane-split scratch buffer.
-const MAX_PACK_WIDTH: usize = 16;
-
 /// Blanket `Permutation` over any `P: PackedValue<Value = Felt>`. See the
-/// equivalent impl on `RpoPermutation256` for the full architectural
-/// rationale; this follows the same lane-split-rejoin recipe with a
-/// constant-folded WIDTH=1 scalar fast-path.
+/// equivalent impl on `RpoPermutation256` for the full rationale; body
+/// delegated to [`permute_packed`] in the shared
+/// `hash::algebraic_sponge` module.
 impl<P> Permutation<[P; STATE_WIDTH]> for Poseidon2Permutation256
 where
     P: PackedValue<Value = Felt>,
 {
     fn permute_mut(&self, state: &mut [P; STATE_WIDTH]) {
+<<<<<<< HEAD
         if P::WIDTH == 1 {
             // SAFETY: P::WIDTH == 1 guarantees byte-equivalence with Felt
             // per the PackedValue safety invariant.
@@ -423,6 +423,9 @@ where
         for col in 0..STATE_WIDTH {
             state[col] = P::from_fn(|lane| rows[lane][col]);
         }
+=======
+        permute_packed(state, p3_permute);
+>>>>>>> 180e8b6ac (refactor(crypto): hoist packed perm body to shared permute_packed helper)
     }
 }
 
