@@ -90,6 +90,13 @@ rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
 std               = ["blake3/std", "dep:cc", "miden-serde-utils/std", "rand/std", "rand/thread_rng", "serde?/std"]
 testing           = ["dep:proptest", "miden-field/testing"]
+# Passthrough that activates miden-field's `packed-felt-simd128` feature.
+# miden-crypto itself doesn't need a flag — its packed Permutation impls
+# are trait-generic over `PackedValue<Value = Felt>` and slot in any packed
+# type provided by downstream miden-field. Exists so consumers (e.g. the
+# wallet's web-client) can flip the feature via miden-crypto without a
+# direct miden-field dep.
+packed-felt-simd128 = ["miden-field/packed-felt-simd128"]
 
 [dependencies]
 # Miden dependencies
