@@ -190,9 +190,9 @@ fn test_poseidon2_permutation_packed_lane_equivalence() {
     }
 
     let lane0: [Felt; STATE_WIDTH] =
-        core::array::from_fn(|i| Felt::new_unchecked((i as u64) * 7 + 1));
+        core::array::from_fn(|i| Felt::new((i as u64) * 7 + 1));
     let lane1: [Felt; STATE_WIDTH] =
-        core::array::from_fn(|i| Felt::new_unchecked((i as u64) * 13 + 31));
+        core::array::from_fn(|i| Felt::new((i as u64) * 13 + 31));
 
     let mut ref0 = lane0;
     let mut ref1 = lane1;

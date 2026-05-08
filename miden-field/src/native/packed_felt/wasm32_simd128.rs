@@ -437,7 +437,7 @@ mod tests {
     use super::*;
 
     fn pack(a: u64, b: u64) -> PackedFelt {
-        PackedFelt([Felt::new_unchecked(a), Felt::new_unchecked(b)])
+        PackedFelt([Felt::new(a), Felt::new(b)])
     }
 
     #[test]
@@ -504,8 +504,8 @@ mod tests {
         for &(a, b) in cases {
             let pkg = pack(a, b);
             let sum_pkg = pkg.add(pkg);
-            let scalar_a = Felt::new_unchecked(a) + Felt::new_unchecked(a);
-            let scalar_b = Felt::new_unchecked(b) + Felt::new_unchecked(b);
+            let scalar_a = Felt::new(a) + Felt::new(a);
+            let scalar_b = Felt::new(b) + Felt::new(b);
             assert_eq!(
                 sum_pkg.0,
                 [scalar_a, scalar_b],
@@ -526,10 +526,10 @@ mod tests {
             (0x1234_5678_9ABC_DEF0, 0xFEDC_BA98_7654_3210),
         ];
         for &(a, b) in cases {
-            let pkg_a = PackedFelt::broadcast(Felt::new_unchecked(a));
-            let pkg_b = PackedFelt::broadcast(Felt::new_unchecked(b));
+            let pkg_a = PackedFelt::broadcast(Felt::new(a));
+            let pkg_b = PackedFelt::broadcast(Felt::new(b));
             let prod_pkg = pkg_a.mul(pkg_b);
-            let scalar = Felt::new_unchecked(a) * Felt::new_unchecked(b);
+            let scalar = Felt::new(a) * Felt::new(b);
             assert_eq!(prod_pkg.0, [scalar, scalar], "mul mismatch for ({a:#x}, {b:#x})");
         }
     }
